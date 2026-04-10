@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import { MessageCircle, Building2, MapPin, UserCircle, BarChart3, Briefcase } from 'lucide-react';
 import { Avatar } from '../../components/ui/Avatar';
@@ -6,16 +6,75 @@ import { Button } from '../../components/ui/Button';
 import { Card, CardBody, CardHeader } from '../../components/ui/Card';
 import { Badge } from '../../components/ui/Badge';
 import { useAuth } from '../../context/AuthContext';
-import { findUserById } from '../../data/users';
 import { Investor } from '../../types';
 
 export const InvestorProfile: React.FC = () => {
   const { id } = useParams<{ id: string }>();
   const { user: currentUser } = useAuth();
-  
-  // Fetch investor data
-  const investor = findUserById(id || '') as Investor | null;
-  
+
+  const [investor, setInvestor] = useState<Investor | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  const apiBaseUrl = import.meta.env.VITE_API_URL as string | undefined;
+  const authHeader = useMemo(() => {
+    const token = localStorage.getItem('business_nexus_access_token');
+    return token ? { Authorization: `Bearer ${token}` } : {};
+  }, []);
+
+  useEffect(() => {
+    if (!id) {
+      setError('Missing investor id');
+      setIsLoading(false);
+      return;
+    }
+
+    if (!apiBaseUrl) {
+      setError('Missing API base URL');
+      setIsLoading(false);
+      return;
+    }
+
+    setIsLoading(true);
+    setError(null);
+
+    fetch(`${apiBaseUrl}/users/${id}`, { headers: authHeader })
+      .then(async response => {
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok) {
+          throw new Error(data.message || data.error || 'Failed to load investor');
+        }
+        return data as Investor;
+      })
+      .then(data => {
+        setInvestor(data);
+      })
+      .catch(err => {
+        setError(err instanceof Error ? err.message : 'Failed to load investor');
+      })
+      .finally(() => setIsLoading(false));
+  }, [apiBaseUrl, authHeader, id]);
+
+  if (isLoading) {
+    return (
+      <div className="text-center py-12">
+        <h2 className="text-2xl font-bold text-gray-900">Loading investor...</h2>
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="text-center py-12">
+        <h2 className="text-2xl font-bold text-gray-900">Unable to load investor</h2>
+        <p className="text-gray-600 mt-2">{error}</p>
+        <Link to="/dashboard/entrepreneur">
+          <Button variant="outline" className="mt-4">Back to Dashboard</Button>
+        </Link>
+      </div>
+    );
+  }
+
   if (!investor || investor.role !== 'investor') {
     return (
       <div className="text-center py-12">
@@ -29,6 +88,9 @@ export const InvestorProfile: React.FC = () => {
   }
   
   const isCurrentUser = currentUser?.id === investor.id;
+  const investmentStages = investor.investmentStage || [];
+  const investmentInterests = investor.investmentInterests || [];
+  const portfolioCompanies = investor.portfolioCompanies || [];
   
   return (
     <div className="space-y-6 animate-fade-in">
@@ -40,7 +102,6 @@ export const InvestorProfile: React.FC = () => {
               src={investor.avatarUrl}
               alt={investor.name}
               size="xl"
-              status={investor.isOnline ? 'online' : 'offline'}
               className="mx-auto sm:mx-0"
             />
             
@@ -48,7 +109,7 @@ export const InvestorProfile: React.FC = () => {
               <h1 className="text-2xl font-bold text-gray-900">{investor.name}</h1>
               <p className="text-gray-600 flex items-center justify-center sm:justify-start mt-1">
                 <Building2 size={16} className="mr-1" />
-                Investor • {investor.totalInvestments} investments
+                Investor • {investor.totalInvestments ?? portfolioCompanies.length} investments
               </p>
               
               <div className="flex flex-wrap gap-2 justify-center sm:justify-start mt-3">
@@ -56,7 +117,7 @@ export const InvestorProfile: React.FC = () => {
                   <MapPin size={14} className="mr-1" />
                   San Francisco, CA
                 </Badge>
-                {investor.investmentStage.map((stage, index) => (
+                {investmentStages.map((stage, index) => (
                   <Badge key={index} variant="secondary" size="sm">{stage}</Badge>
                 ))}
               </div>
@@ -109,7 +170,7 @@ export const InvestorProfile: React.FC = () => {
                 <div>
                   <h3 className="text-md font-medium text-gray-900">Industries</h3>
                   <div className="flex flex-wrap gap-2 mt-2">
-                    {investor.investmentInterests.map((interest, index) => (
+                    {investmentInterests.map((interest, index) => (
                       <Badge key={index} variant="primary" size="md">{interest}</Badge>
                     ))}
                   </div>
@@ -118,7 +179,7 @@ export const InvestorProfile: React.FC = () => {
                 <div>
                   <h3 className="text-md font-medium text-gray-900">Investment Stages</h3>
                   <div className="flex flex-wrap gap-2 mt-2">
-                    {investor.investmentStage.map((stage, index) => (
+                    {investmentStages.map((stage, index) => (
                       <Badge key={index} variant="secondary" size="md">{stage}</Badge>
                     ))}
                   </div>
@@ -153,11 +214,11 @@ export const InvestorProfile: React.FC = () => {
           <Card>
             <CardHeader className="flex justify-between items-center">
               <h2 className="text-lg font-medium text-gray-900">Portfolio Companies</h2>
-              <span className="text-sm text-gray-500">{investor.portfolioCompanies.length} companies</span>
+              <span className="text-sm text-gray-500">{portfolioCompanies.length} companies</span>
             </CardHeader>
             <CardBody>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                {investor.portfolioCompanies.map((company, index) => (
+                {portfolioCompanies.map((company, index) => (
                   <div key={index} className="flex items-center p-3 border border-gray-200 rounded-md">
                     <div className="p-3 bg-primary-50 rounded-md mr-3">
                       <Briefcase size={18} className="text-primary-700" />
@@ -191,7 +252,7 @@ export const InvestorProfile: React.FC = () => {
                 
                 <div>
                   <span className="text-sm text-gray-500">Total Investments</span>
-                  <p className="text-md font-medium text-gray-900">{investor.totalInvestments} companies</p>
+                  <p className="text-md font-medium text-gray-900">{investor.totalInvestments ?? portfolioCompanies.length} companies</p>
                 </div>
                 
                 <div>
@@ -257,7 +318,7 @@ export const InvestorProfile: React.FC = () => {
                   <div className="flex justify-between items-center">
                     <div>
                       <h3 className="text-sm font-medium text-gray-900">Active Investments</h3>
-                      <p className="text-xl font-semibold text-primary-700 mt-1">{investor.portfolioCompanies.length}</p>
+                      <p className="text-xl font-semibold text-primary-700 mt-1">{portfolioCompanies.length}</p>
                     </div>
                     <BarChart3 size={24} className="text-primary-600" />
                   </div>

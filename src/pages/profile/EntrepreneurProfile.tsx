@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import { MessageCircle, Users, Calendar, Building2, MapPin, UserCircle, FileText, DollarSign, Send } from 'lucide-react';
 import { Avatar } from '../../components/ui/Avatar';
@@ -6,17 +6,76 @@ import { Button } from '../../components/ui/Button';
 import { Card, CardBody, CardHeader } from '../../components/ui/Card';
 import { Badge } from '../../components/ui/Badge';
 import { useAuth } from '../../context/AuthContext';
-import { findUserById } from '../../data/users';
 import { createCollaborationRequest, getRequestsFromInvestor } from '../../data/collaborationRequests';
 import { Entrepreneur } from '../../types';
 
 export const EntrepreneurProfile: React.FC = () => {
   const { id } = useParams<{ id: string }>();
   const { user: currentUser } = useAuth();
-  
-  // Fetch entrepreneur data
-  const entrepreneur = findUserById(id || '') as Entrepreneur | null;
-  
+
+  const [entrepreneur, setEntrepreneur] = useState<Entrepreneur | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  const apiBaseUrl = import.meta.env.VITE_API_URL as string | undefined;
+  const authHeader = useMemo(() => {
+    const token = localStorage.getItem('business_nexus_access_token');
+    return token ? { Authorization: `Bearer ${token}` } : {};
+  }, []);
+
+  useEffect(() => {
+    if (!id) {
+      setError('Missing entrepreneur id');
+      setIsLoading(false);
+      return;
+    }
+
+    if (!apiBaseUrl) {
+      setError('Missing API base URL');
+      setIsLoading(false);
+      return;
+    }
+
+    setIsLoading(true);
+    setError(null);
+
+    fetch(`${apiBaseUrl}/users/${id}`, { headers: authHeader })
+      .then(async response => {
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok) {
+          throw new Error(data.message || data.error || 'Failed to load entrepreneur');
+        }
+        return data as Entrepreneur;
+      })
+      .then(data => {
+        setEntrepreneur(data);
+      })
+      .catch(err => {
+        setError(err instanceof Error ? err.message : 'Failed to load entrepreneur');
+      })
+      .finally(() => setIsLoading(false));
+  }, [apiBaseUrl, authHeader, id]);
+
+  if (isLoading) {
+    return (
+      <div className="text-center py-12">
+        <h2 className="text-2xl font-bold text-gray-900">Loading entrepreneur...</h2>
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="text-center py-12">
+        <h2 className="text-2xl font-bold text-gray-900">Unable to load entrepreneur</h2>
+        <p className="text-gray-600 mt-2">{error}</p>
+        <Link to="/dashboard/investor">
+          <Button variant="outline" className="mt-4">Back to Dashboard</Button>
+        </Link>
+      </div>
+    );
+  }
+
   if (!entrepreneur || entrepreneur.role !== 'entrepreneur') {
     return (
       <div className="text-center py-12">
@@ -42,7 +101,7 @@ export const EntrepreneurProfile: React.FC = () => {
       createCollaborationRequest(
         currentUser.id,
         id,
-        `I'm interested in learning more about ${entrepreneur.startupName} and would like to explore potential investment opportunities.`
+        `I'm interested in learning more about ${entrepreneur.startupName || 'your startup'} and would like to explore potential investment opportunities.`
       );
       
       // In a real app, we would refresh the data or update state
@@ -61,7 +120,6 @@ export const EntrepreneurProfile: React.FC = () => {
               src={entrepreneur.avatarUrl}
               alt={entrepreneur.name}
               size="xl"
-              status={entrepreneur.isOnline ? 'online' : 'offline'}
               className="mx-auto sm:mx-0"
             />
             
@@ -69,22 +127,22 @@ export const EntrepreneurProfile: React.FC = () => {
               <h1 className="text-2xl font-bold text-gray-900">{entrepreneur.name}</h1>
               <p className="text-gray-600 flex items-center justify-center sm:justify-start mt-1">
                 <Building2 size={16} className="mr-1" />
-                Founder at {entrepreneur.startupName}
+                Founder at {entrepreneur.startupName || 'Startup'}
               </p>
               
               <div className="flex flex-wrap gap-2 justify-center sm:justify-start mt-3">
-                <Badge variant="primary">{entrepreneur.industry}</Badge>
+                <Badge variant="primary">{entrepreneur.industry || 'Industry'}</Badge>
                 <Badge variant="gray">
                   <MapPin size={14} className="mr-1" />
-                  {entrepreneur.location}
+                  {entrepreneur.location || 'Location'}
                 </Badge>
                 <Badge variant="accent">
                   <Calendar size={14} className="mr-1" />
-                  Founded {entrepreneur.foundedYear}
+                  Founded {entrepreneur.foundedYear || '—'}
                 </Badge>
                 <Badge variant="secondary">
                   <Users size={14} className="mr-1" />
-                  {entrepreneur.teamSize} team members
+                  {entrepreneur.teamSize || 1} team members
                 </Badge>
               </div>
             </div>
@@ -149,21 +207,23 @@ export const EntrepreneurProfile: React.FC = () => {
                 <div>
                   <h3 className="text-md font-medium text-gray-900">Problem Statement</h3>
                   <p className="text-gray-700 mt-1">
-                    {entrepreneur?.pitchSummary?.split('.')[0]}.
+                    {entrepreneur?.pitchSummary?.split('.')[0] ? `${entrepreneur.pitchSummary.split('.')[0]}.` : 'Problem statement not provided.'}
                   </p>
                 </div>
                 
                 <div>
                   <h3 className="text-md font-medium text-gray-900">Solution</h3>
                   <p className="text-gray-700 mt-1">
-                    {entrepreneur.pitchSummary}
+                    {entrepreneur.pitchSummary || 'Solution details not provided.'}
                   </p>
                 </div>
                 
                 <div>
                   <h3 className="text-md font-medium text-gray-900">Market Opportunity</h3>
                   <p className="text-gray-700 mt-1">
-                    The {entrepreneur.industry} market is experiencing significant growth, with a projected CAGR of 14.5% through 2027. Our solution addresses key pain points in this expanding market.
+                    {entrepreneur.industry
+                      ? `The ${entrepreneur.industry} market is experiencing significant growth, with a projected CAGR of 14.5% through 2027. Our solution addresses key pain points in this expanding market.`
+                      : 'Market opportunity details are being prepared.'}
                   </p>
                 </div>
                 
@@ -181,7 +241,7 @@ export const EntrepreneurProfile: React.FC = () => {
           <Card>
             <CardHeader className="flex justify-between items-center">
               <h2 className="text-lg font-medium text-gray-900">Team</h2>
-              <span className="text-sm text-gray-500">{entrepreneur.teamSize} members</span>
+              <span className="text-sm text-gray-500">{entrepreneur.teamSize || 1} members</span>
             </CardHeader>
             <CardBody>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -224,9 +284,9 @@ export const EntrepreneurProfile: React.FC = () => {
                   </div>
                 </div>
                 
-                {entrepreneur.teamSize > 3 && (
+                {(entrepreneur.teamSize || 1) > 3 && (
                   <div className="flex items-center justify-center p-3 border border-dashed border-gray-200 rounded-md">
-                    <p className="text-sm text-gray-500">+ {entrepreneur.teamSize - 3} more team members</p>
+                    <p className="text-sm text-gray-500">+ {(entrepreneur.teamSize || 1) - 3} more team members</p>
                   </div>
                 )}
               </div>
@@ -247,7 +307,7 @@ export const EntrepreneurProfile: React.FC = () => {
                   <span className="text-sm text-gray-500">Current Round</span>
                   <div className="flex items-center mt-1">
                     <DollarSign size={18} className="text-accent-600 mr-1" />
-                    <p className="text-lg font-semibold text-gray-900">{entrepreneur.fundingNeeded}</p>
+                    <p className="text-lg font-semibold text-gray-900">{entrepreneur.fundingNeeded || 'Not specified'}</p>
                   </div>
                 </div>
                 
