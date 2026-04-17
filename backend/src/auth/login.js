@@ -21,6 +21,7 @@ const buildUserPayload = (user) => {
         role,
         avatarUrl: user.avatarUrl || `https://ui-avatars.com/api/?name=${encodeURIComponent(displayName)}&background=random`,
         bio: user.about || '',
+        location: user.address || '',
         createdAt: user.createdAt
     };
 };

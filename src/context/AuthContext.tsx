@@ -215,9 +215,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     toast.success('Logged out successfully');
   };
 
-  const updateProfile = async (userId: string, updates: Partial<User>): Promise<void> => {
+  const updateProfile = async (userId: string, updates: Record<string, unknown>): Promise<User> => {
     try {
-      const updatedUser = await apiRequest<User>(`/users/${userId}`, {
+      const updatedUser = await apiRequest<User>(`/users/update/${userId}`, {
         method: 'PATCH',
         body: JSON.stringify(updates)
       });
@@ -228,6 +228,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       }
 
       toast.success('Profile updated successfully');
+      return updatedUser;
     } catch (error) {
       toast.error((error as Error).message);
       throw error;

@@ -7,6 +7,7 @@ export interface User {
   role: UserRole;
   avatarUrl: string;
   bio: string;
+  location?: string;
   isOnline?: boolean;
   createdAt: string;
 }
@@ -75,7 +76,7 @@ export interface AuthContextType {
   logout: () => void;
   forgotPassword: (email: string) => Promise<void>;
   resetPassword: (token: string, newPassword: string) => Promise<void>;
-  updateProfile: (userId: string, updates: Partial<User>) => Promise<void>;
+  updateProfile: (userId: string, updates: Record<string, unknown>) => Promise<User>;
   isAuthenticated: boolean;
   isLoading: boolean;
 }

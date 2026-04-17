@@ -9,6 +9,7 @@ const UserSchema = new Schema({
     position: String,
     about: String,
     address: String,
+    portfolioCompanies: [{ type: String }],
     tags: [{ name: String, value: Number }],
     industries: [{ type: String, lowercase: true }],
     investmantStages: [{ type: String }],

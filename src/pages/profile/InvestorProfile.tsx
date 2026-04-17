@@ -5,16 +5,28 @@ import { Avatar } from '../../components/ui/Avatar';
 import { Button } from '../../components/ui/Button';
 import { Card, CardBody, CardHeader } from '../../components/ui/Card';
 import { Badge } from '../../components/ui/Badge';
+import { Input } from '../../components/ui/Input';
 import { useAuth } from '../../context/AuthContext';
 import { Investor } from '../../types';
 
 export const InvestorProfile: React.FC = () => {
   const { id } = useParams<{ id: string }>();
-  const { user: currentUser } = useAuth();
+  const { user: currentUser, updateProfile } = useAuth();
 
   const [investor, setInvestor] = useState<Investor | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [isEditing, setIsEditing] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
+  const [formError, setFormError] = useState<string | null>(null);
+  const [formState, setFormState] = useState({
+    name: '',
+    bio: '',
+    location: '',
+    investmentInterests: '',
+    investmentStages: '',
+    portfolioCompanies: ''
+  });
 
   const apiBaseUrl = import.meta.env.VITE_API_URL as string | undefined;
   const authHeader = useMemo(() => {
@@ -54,6 +66,70 @@ export const InvestorProfile: React.FC = () => {
       })
       .finally(() => setIsLoading(false));
   }, [apiBaseUrl, authHeader, id]);
+
+  useEffect(() => {
+    if (!investor) {
+      return;
+    }
+
+    setFormState({
+      name: investor.name || '',
+      bio: investor.bio || '',
+      location: investor.location || '',
+      investmentInterests: (investor.investmentInterests || []).join(', '),
+      investmentStages: (investor.investmentStage || []).join(', '),
+      portfolioCompanies: (investor.portfolioCompanies || []).join(', ')
+    });
+  }, [investor]);
+
+  const parseList = (value: string) =>
+    value
+      .split(',')
+      .map(item => item.trim())
+      .filter(Boolean);
+
+  const handleSave = async () => {
+    if (!id || !investor) {
+      return;
+    }
+
+    setIsSaving(true);
+    setFormError(null);
+
+    const payload = {
+      username: formState.name.trim(),
+      about: formState.bio.trim(),
+      address: formState.location.trim(),
+      industries: parseList(formState.investmentInterests),
+      investmantStages: parseList(formState.investmentStages),
+      portfolioCompanies: parseList(formState.portfolioCompanies)
+    };
+
+    try {
+      const updatedUser = await updateProfile(id, payload);
+      setInvestor(updatedUser as Investor);
+      setIsEditing(false);
+    } catch (err) {
+      setFormError(err instanceof Error ? err.message : 'Unable to update profile');
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  const handleCancel = () => {
+    if (investor) {
+      setFormState({
+        name: investor.name || '',
+        bio: investor.bio || '',
+        location: investor.location || '',
+        investmentInterests: (investor.investmentInterests || []).join(', '),
+        investmentStages: (investor.investmentStage || []).join(', '),
+        portfolioCompanies: (investor.portfolioCompanies || []).join(', ')
+      });
+    }
+    setFormError(null);
+    setIsEditing(false);
+  };
 
   if (isLoading) {
     return (
@@ -115,7 +191,7 @@ export const InvestorProfile: React.FC = () => {
               <div className="flex flex-wrap gap-2 justify-center sm:justify-start mt-3">
                 <Badge variant="primary">
                   <MapPin size={14} className="mr-1" />
-                  San Francisco, CA
+                  {investor.location || 'Location'}
                 </Badge>
                 {investmentStages.map((stage, index) => (
                   <Badge key={index} variant="secondary" size="sm">{stage}</Badge>
@@ -139,13 +215,76 @@ export const InvestorProfile: React.FC = () => {
               <Button
                 variant="outline"
                 leftIcon={<UserCircle size={18} />}
+                onClick={() => (isEditing ? handleCancel() : setIsEditing(true))}
               >
-                Edit Profile
+                {isEditing ? 'Cancel' : 'Edit Profile'}
               </Button>
             )}
           </div>
         </CardBody>
       </Card>
+
+      {isCurrentUser && isEditing && (
+        <Card>
+          <CardHeader>
+            <h2 className="text-lg font-medium text-gray-900">Edit Profile</h2>
+          </CardHeader>
+          <CardBody className="space-y-4">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <Input
+                label="Full Name"
+                value={formState.name}
+                onChange={event => setFormState(prev => ({ ...prev, name: event.target.value }))}
+                fullWidth
+              />
+              <Input
+                label="Location"
+                value={formState.location}
+                onChange={event => setFormState(prev => ({ ...prev, location: event.target.value }))}
+                fullWidth
+              />
+              <Input
+                label="Investment Interests (comma-separated)"
+                value={formState.investmentInterests}
+                onChange={event => setFormState(prev => ({ ...prev, investmentInterests: event.target.value }))}
+                fullWidth
+              />
+              <Input
+                label="Investment Stages (comma-separated)"
+                value={formState.investmentStages}
+                onChange={event => setFormState(prev => ({ ...prev, investmentStages: event.target.value }))}
+                fullWidth
+              />
+              <Input
+                label="Portfolio Companies (comma-separated)"
+                value={formState.portfolioCompanies}
+                onChange={event => setFormState(prev => ({ ...prev, portfolioCompanies: event.target.value }))}
+                fullWidth
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Bio</label>
+              <textarea
+                className="w-full rounded-md border-gray-300 shadow-sm focus:border-primary-500 focus:ring-primary-500"
+                rows={4}
+                value={formState.bio}
+                onChange={event => setFormState(prev => ({ ...prev, bio: event.target.value }))}
+              />
+            </div>
+            {formError && (
+              <p className="text-sm text-error-500">{formError}</p>
+            )}
+            <div className="flex justify-end gap-2">
+              <Button variant="outline" onClick={handleCancel} disabled={isSaving}>
+                Cancel
+              </Button>
+              <Button onClick={handleSave} disabled={isSaving}>
+                {isSaving ? 'Saving...' : 'Save Changes'}
+              </Button>
+            </div>
+          </CardBody>
+        </Card>
+      )}
       
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         {/* Main content - left side */}
