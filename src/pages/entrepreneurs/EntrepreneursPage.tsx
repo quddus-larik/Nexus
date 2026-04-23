@@ -1,18 +1,52 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Search, Filter, MapPin } from 'lucide-react';
 import { Input } from '../../components/ui/Input';
 import { Card, CardHeader, CardBody } from '../../components/ui/Card';
 import { Badge } from '../../components/ui/Badge';
 import { EntrepreneurCard } from '../../components/entrepreneur/EntrepreneurCard';
-import { entrepreneurs } from '../../data/users';
+import { Entrepreneur } from '../../types';
 
 export const EntrepreneursPage: React.FC = () => {
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedIndustries, setSelectedIndustries] = useState<string[]>([]);
   const [selectedFundingRange, setSelectedFundingRange] = useState<string[]>([]);
+  const [entrepreneurs, setEntrepreneurs] = useState<Entrepreneur[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  const apiBaseUrl = import.meta.env.VITE_API_URL as string | undefined;
+
+  // Fetch entrepreneurs from API
+  useEffect(() => {
+    if (!apiBaseUrl) {
+      setError('Missing API base URL');
+      setIsLoading(false);
+      return;
+    }
+
+    setIsLoading(true);
+    setError(null);
+
+    fetch(`${apiBaseUrl}/entrepreneur/list/all`)
+      .then(async response => {
+        const data = await response.json().catch(() => []);
+        if (!response.ok) {
+          throw new Error(data.error || data.message || 'Failed to load entrepreneurs');
+        }
+        return data;
+      })
+      .then(data => {
+        setEntrepreneurs(Array.isArray(data) ? data : []);
+      })
+      .catch(err => {
+        setError(err instanceof Error ? err.message : 'Failed to load entrepreneurs');
+        setEntrepreneurs([]);
+      })
+      .finally(() => setIsLoading(false));
+  }, [apiBaseUrl]);
   
   // Get unique industries and funding ranges
-  const allIndustries = Array.from(new Set(entrepreneurs.map(e => e.industry)));
+  const allIndustries = Array.from(new Set(entrepreneurs.map(e => e.industry).filter(Boolean)));
   const fundingRanges = ['< $500K', '$500K - $1M', '$1M - $5M', '> $5M'];
   
   // Filter entrepreneurs based on search and filters
@@ -57,6 +91,30 @@ export const EntrepreneursPage: React.FC = () => {
         : [...prev, range]
     );
   };
+
+  if (isLoading) {
+    return (
+      <div className="text-center py-12">
+        <h2 className="text-2xl font-bold text-gray-900">Loading startups...</h2>
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="text-center py-12">
+        <h2 className="text-2xl font-bold text-gray-900">Unable to load startups</h2>
+        <p className="text-gray-600 mt-2">{error}</p>
+      </div>
+    );
+  }
+  
+  const handleTeamSizeUpdate = async (id: string, newTeamSize: number) => {
+    // Update the entrepreneur in the list
+    setEntrepreneurs(prev => 
+      prev.map(e => e.id === id ? { ...e, teamSize: newTeamSize } : e)
+    );
+  };
   
   return (
     <div className="space-y-6 animate-fade-in">
@@ -76,19 +134,23 @@ export const EntrepreneursPage: React.FC = () => {
               <div>
                 <h3 className="text-sm font-medium text-gray-900 mb-2">Industry</h3>
                 <div className="space-y-2">
-                  {allIndustries.map(industry => (
-                    <button
-                      key={industry}
-                      onClick={() => toggleIndustry(industry)}
-                      className={`block w-full text-left px-3 py-2 rounded-md text-sm ${
-                        selectedIndustries.includes(industry)
-                          ? 'bg-primary-50 text-primary-700'
-                          : 'text-gray-700 hover:bg-gray-50'
-                      }`}
-                    >
-                      {industry}
-                    </button>
-                  ))}
+                  {allIndustries.length > 0 ? (
+                    allIndustries.map(industry => (
+                      <button
+                        key={industry}
+                        onClick={() => toggleIndustry(industry)}
+                        className={`block w-full text-left px-3 py-2 rounded-md text-sm ${
+                          selectedIndustries.includes(industry)
+                            ? 'bg-primary-50 text-primary-700'
+                            : 'text-gray-700 hover:bg-gray-50'
+                        }`}
+                      >
+                        {industry}
+                      </button>
+                    ))
+                  ) : (
+                    <p className="text-sm text-gray-500">No industries available</p>
+                  )}
                 </div>
               </div>
               
@@ -151,14 +213,21 @@ export const EntrepreneursPage: React.FC = () => {
             </div>
           </div>
           
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-            {filteredEntrepreneurs.map(entrepreneur => (
-              <EntrepreneurCard
-                key={entrepreneur.id}
-                entrepreneur={entrepreneur}
-              />
-            ))}
-          </div>
+          {filteredEntrepreneurs.length > 0 ? (
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              {filteredEntrepreneurs.map(entrepreneur => (
+                <EntrepreneurCard
+                  key={entrepreneur.id}
+                  entrepreneur={entrepreneur}
+                  onTeamSizeUpdate={handleTeamSizeUpdate}
+                />
+              ))}
+            </div>
+          ) : (
+            <div className="text-center py-12">
+              <p className="text-gray-600">No startups found matching your criteria</p>
+            </div>
+          )}
         </div>
       </div>
     </div>

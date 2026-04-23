@@ -1,34 +1,76 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Search, Filter, MapPin } from 'lucide-react';
 import { Input } from '../../components/ui/Input';
 import { Card, CardHeader, CardBody } from '../../components/ui/Card';
 import { Badge } from '../../components/ui/Badge';
 import { InvestorCard } from '../../components/investor/InvestorCard';
-import { investors } from '../../data/users';
+
+interface Investor {
+  id: string;
+  name: string;
+  email: string;
+  role: string;
+  avatarUrl: string;
+  bio: string;
+  location: string;
+  investmentStage: string[];
+  investmentInterests: string[];
+  portfolioCompanies: string[];
+  position: string;
+  createdAt: string;
+}
 
 export const InvestorsPage: React.FC = () => {
+  const [investors, setInvestors] = useState<Investor[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedStages, setSelectedStages] = useState<string[]>([]);
   const [selectedInterests, setSelectedInterests] = useState<string[]>([]);
+
+  useEffect(() => {
+    fetchInvestors();
+  }, []);
+
+  const fetchInvestors = async () => {
+    try {
+      setLoading(true);
+      setError(null);
+      const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:8080';
+      const response = await fetch(`${apiUrl}/investor/list/all`);
+      
+      if (!response.ok) {
+        throw new Error('Failed to fetch investors');
+      }
+      
+      const data = await response.json();
+      setInvestors(data);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'An error occurred');
+      console.error('Error fetching investors:', err);
+    } finally {
+      setLoading(false);
+    }
+  };
   
   // Get unique investment stages and interests
-  const allStages = Array.from(new Set(investors.flatMap(i => i.investmentStage)));
-  const allInterests = Array.from(new Set(investors.flatMap(i => i.investmentInterests)));
-  
+  const allStages = Array.from(new Set(investors.flatMap(i => i.investmentStage || [])));
+  const allInterests = Array.from(new Set(investors.flatMap(i => i.investmentInterests || [])));
+
   // Filter investors based on search and filters
   const filteredInvestors = investors.filter(investor => {
     const matchesSearch = searchQuery === '' || 
       investor.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
       investor.bio.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      investor.investmentInterests.some(interest => 
+      (investor.investmentInterests || []).some(interest => 
         interest.toLowerCase().includes(searchQuery.toLowerCase())
       );
     
     const matchesStages = selectedStages.length === 0 ||
-      investor.investmentStage.some(stage => selectedStages.includes(stage));
+      (investor.investmentStage || []).some(stage => selectedStages.includes(stage));
     
     const matchesInterests = selectedInterests.length === 0 ||
-      investor.investmentInterests.some(interest => selectedInterests.includes(interest));
+      (investor.investmentInterests || []).some(interest => selectedInterests.includes(interest));
     
     return matchesSearch && matchesStages && matchesInterests;
   });
@@ -139,14 +181,37 @@ export const InvestorsPage: React.FC = () => {
             </div>
           </div>
           
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-            {filteredInvestors.map(investor => (
-              <InvestorCard
-                key={investor.id}
-                investor={investor}
-              />
-            ))}
-          </div>
+          {loading ? (
+            <div className="flex justify-center items-center py-12">
+              <div className="text-center">
+                <div className="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-primary-600 mb-4"></div>
+                <p className="text-gray-600">Loading investors...</p>
+              </div>
+            </div>
+          ) : error ? (
+            <div className="bg-red-50 border border-red-200 rounded-lg p-4">
+              <p className="text-red-800">Error: {error}</p>
+              <button 
+                onClick={fetchInvestors}
+                className="mt-2 text-sm px-3 py-1 bg-red-600 text-white rounded hover:bg-red-700"
+              >
+                Try Again
+              </button>
+            </div>
+          ) : filteredInvestors.length === 0 ? (
+            <div className="text-center py-12">
+              <p className="text-gray-600">No investors found matching your criteria.</p>
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              {filteredInvestors.map(investor => (
+                <InvestorCard
+                  key={investor.id}
+                  investor={investor}
+                />
+              ))}
+            </div>
+          )}
         </div>
       </div>
     </div>

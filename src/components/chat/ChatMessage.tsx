@@ -2,7 +2,7 @@ import React from 'react';
 import { formatDistanceToNow } from 'date-fns';
 import { Message } from '../../types';
 import { Avatar } from '../ui/Avatar';
-import { findUserById } from '../../data/users';
+import { useAuth } from '../../context/AuthContext';
 
 interface ChatMessageProps {
   message: Message;
@@ -10,18 +10,22 @@ interface ChatMessageProps {
 }
 
 export const ChatMessage: React.FC<ChatMessageProps> = ({ message, isCurrentUser }) => {
-  const user = findUserById(message.senderId);
-  
-  if (!user) return null;
-  
+  const { user: currentUser } = useAuth();
+  const displayName = isCurrentUser
+    ? currentUser?.name || 'You'
+    : message.senderName || 'User';
+  const avatarUrl = isCurrentUser
+    ? currentUser?.avatarUrl || ''
+    : message.senderAvatar || '';
+
   return (
     <div
       className={`flex ${isCurrentUser ? 'justify-end' : 'justify-start'} mb-4 animate-fade-in`}
     >
       {!isCurrentUser && (
         <Avatar
-          src={user.avatarUrl}
-          alt={user.name}
+          src={avatarUrl}
+          alt={displayName}
           size="sm"
           className="mr-2 self-end"
         />
@@ -29,7 +33,7 @@ export const ChatMessage: React.FC<ChatMessageProps> = ({ message, isCurrentUser
       
       <div className={`flex flex-col ${isCurrentUser ? 'items-end' : 'items-start'}`}>
         <div
-          className={`max-w-xs sm:max-w-md px-4 py-2 rounded-lg ${
+          className={`max-w-xs sm:max-w-md px-4 py-2 rounded-lg break-words ${
             isCurrentUser
               ? 'bg-primary-600 text-white rounded-br-none'
               : 'bg-gray-100 text-gray-800 rounded-bl-none'
@@ -45,8 +49,8 @@ export const ChatMessage: React.FC<ChatMessageProps> = ({ message, isCurrentUser
       
       {isCurrentUser && (
         <Avatar
-          src={user.avatarUrl}
-          alt={user.name}
+          src={avatarUrl}
+          alt={displayName}
           size="sm"
           className="ml-2 self-end"
         />

@@ -9,6 +9,8 @@ const UserSchema = new Schema({
     position: String,
     about: String,
     address: String,
+    teamSize: { type: Number, default: 1 },
+    teamMembers: [{ name: String, role: String, type: Number }],
     portfolioCompanies: [{ type: String }],
     tags: [{ name: String, value: Number }],
     industries: [{ type: String, lowercase: true }],

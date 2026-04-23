@@ -21,6 +21,7 @@ export interface Entrepreneur extends User {
   location: string;
   foundedYear: number;
   teamSize: number;
+  teamMembers?: Array<{ name: string; role: string; type: number }>;
 }
 
 export interface Investor extends User {
@@ -40,6 +41,10 @@ export interface Message {
   content: string;
   timestamp: string;
   isRead: boolean;
+  senderName?: string;
+  senderAvatar?: string;
+  receiverName?: string;
+  receiverAvatar?: string;
 }
 
 export interface ChatConversation {

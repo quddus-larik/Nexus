@@ -1,0 +1,258 @@
+const express = require('express');
+
+const Deal = require('../../models/deal.model');
+const Message = require('../../models/message.model');
+const Notification = require('../../models/notifications.model');
+const User = require('../../models/user.model');
+
+const router = express.Router();
+
+const buildAvatarUrl = (displayName) =>
+    `https://ui-avatars.com/api/?name=${encodeURIComponent(displayName || 'User')}&background=random`;
+
+const buildDisplayName = (user) => user?.username || user?.email?.split('@')[0] || 'User';
+
+const buildPartyPayload = (user) => {
+    if (!user) {
+        return null;
+    }
+
+    const displayName = buildDisplayName(user);
+
+    return {
+        id: user._id?.toString?.() || String(user._id),
+        name: displayName,
+        email: user.email || '',
+        role: String(user.type || '').toLowerCase() === 'investor' ? 'investor' : 'entrepreneur',
+        avatarUrl: user.avatarUrl || buildAvatarUrl(displayName),
+        bio: user.about || '',
+        location: user.address || '',
+        startupName: user.position || 'Startup',
+        industry: Array.isArray(user.industries) ? user.industries[0] || '' : '',
+        createdAt: user.createdAt
+    };
+};
+
+const formatDeal = (deal) => ({
+    id: deal._id?.toString?.() || String(deal._id),
+    investor: buildPartyPayload(deal.investor),
+    startup: buildPartyPayload(deal.startup),
+    roomId: deal.roomId,
+    title: deal.title,
+    amount: deal.amount,
+    currency: deal.currency,
+    equity: deal.equity,
+    round: deal.round,
+    note: deal.note,
+    status: deal.status,
+    isMock: Boolean(deal.isMock),
+    source: deal.source,
+    metadata: deal.metadata || {},
+    lastActivityAt: deal.lastActivityAt || deal.updatedAt,
+    createdAt: deal.createdAt,
+    updatedAt: deal.updatedAt
+});
+
+const parseAmount = (value) => {
+    const parsed = Number(String(value).replace(/,/g, '').trim());
+    return Number.isFinite(parsed) ? parsed : null;
+};
+
+const parseEquity = (value) => {
+    const parsed = Number(String(value).replace('%', '').trim());
+    return Number.isFinite(parsed) ? parsed : null;
+};
+
+const getValidatedStatus = (status) => {
+    const allowed = ['Proposed', 'Due Diligence', 'Term Sheet', 'Negotiation', 'Closed', 'Passed'];
+    return allowed.includes(status) ? status : 'Proposed';
+};
+
+const getSafeCurrencyCode = (currency) => {
+    const code = String(currency || 'USD').trim().toUpperCase();
+    return /^[A-Z]{3}$/.test(code) ? code : 'USD';
+};
+
+const hasSharedConversation = async (userId, otherUserId) => {
+    const roomId = [String(userId), String(otherUserId)].sort().join('-');
+
+    return Message.exists({ roomId });
+};
+
+router.get('/', async (req, res) => {
+    try {
+        const deals = await Deal.find({
+            $or: [
+                { investor: req.user._id },
+                { startup: req.user._id }
+            ]
+        })
+            .sort({ updatedAt: -1 })
+            .populate('investor', 'username email avatarUrl type about address position industries createdAt')
+            .populate('startup', 'username email avatarUrl type about address position industries createdAt')
+            .lean();
+
+        return res.status(200).json({
+            deals: deals.map(formatDeal)
+        });
+    } catch (err) {
+        return res.status(500).json({ error: 'Failed to fetch deals' });
+    }
+});
+
+router.get('/eligible', async (req, res) => {
+    try {
+        const messages = await Message.find({
+            $or: [
+                { senderId: req.user._id },
+                { receiverId: req.user._id }
+            ]
+        })
+            .sort({ createdAt: -1 })
+            .populate('senderId', 'username email avatarUrl type about address position industries createdAt')
+            .populate('receiverId', 'username email avatarUrl type about address position industries createdAt')
+            .lean();
+
+        const eligibleRole = String(req.user.type || '').toLowerCase() === 'investor' ? 'entrepreneur' : 'investor';
+        const contactMap = new Map();
+
+        messages.forEach((message) => {
+            const sender = buildPartyPayload(message.senderId);
+            const receiver = buildPartyPayload(message.receiverId);
+            const senderId = sender?.id;
+            const receiverId = receiver?.id;
+            const otherParty = senderId === String(req.user._id) ? receiver : sender;
+
+            if (!otherParty || otherParty.id === String(req.user._id)) {
+                return;
+            }
+
+            if (otherParty.role !== eligibleRole) {
+                return;
+            }
+
+            if (!contactMap.has(otherParty.id)) {
+                contactMap.set(otherParty.id, {
+                    ...otherParty,
+                    lastMessage: message.content,
+                    lastMessageAt: message.createdAt,
+                    messageCount: 1,
+                    roomId: [String(req.user._id), otherParty.id].sort().join('-')
+                });
+                return;
+            }
+
+            const existing = contactMap.get(otherParty.id);
+            existing.messageCount += 1;
+        });
+
+        return res.status(200).json({
+            contacts: Array.from(contactMap.values())
+        });
+    } catch (err) {
+        return res.status(500).json({ error: 'Failed to fetch eligible deal contacts' });
+    }
+});
+
+router.post('/', async (req, res) => {
+    try {
+        const {
+            counterpartyId,
+            title,
+            amount,
+            equity,
+            round,
+            note,
+            currency,
+            status
+        } = req.body || {};
+
+        if (!counterpartyId) {
+            return res.status(400).json({ error: 'Counterparty is required' });
+        }
+
+        const parsedAmount = parseAmount(amount);
+        if (parsedAmount === null || parsedAmount <= 0) {
+            return res.status(400).json({ error: 'Valid investment amount is required' });
+        }
+
+        const parsedEquity = parseEquity(equity);
+        if (parsedEquity === null || parsedEquity <= 0 || parsedEquity > 100) {
+            return res.status(400).json({ error: 'Valid equity percentage is required' });
+        }
+
+        const counterparty = await User.findById(counterpartyId).lean();
+        if (!counterparty) {
+            return res.status(404).json({ error: 'Counterparty not found' });
+        }
+
+        const currentUserRole = String(req.user.type || '').toLowerCase();
+        const counterpartyRole = String(counterparty.type || '').toLowerCase();
+        const roomId = [String(req.user._id), String(counterparty._id)].sort().join('-');
+
+        const conversationExists = await hasSharedConversation(req.user._id, counterparty._id);
+        if (!conversationExists) {
+            return res.status(403).json({ error: 'Message the member before creating a deal' });
+        }
+
+        if (currentUserRole === counterpartyRole) {
+            return res.status(400).json({ error: 'Deals require a startup and an investor' });
+        }
+
+        const investorId = currentUserRole === 'investor' ? req.user._id : counterparty._id;
+        const startupId = currentUserRole === 'investor' ? counterparty._id : req.user._id;
+        const currentUserName = buildDisplayName(req.user);
+        const counterpartyName = buildDisplayName(counterparty);
+        const dealTitle = String(title || '').trim() || `Mock investment for ${counterpartyName}`;
+        const dealStatus = getValidatedStatus(status || 'Proposed');
+        const safeCurrencyCode = getSafeCurrencyCode(currency);
+
+        const deal = await Deal.create({
+            investor: investorId,
+            startup: startupId,
+            roomId,
+            title: dealTitle,
+            amount: parsedAmount,
+            currency: safeCurrencyCode,
+            equity: parsedEquity,
+            round: String(round || 'Seed').trim() || 'Seed',
+            note: String(note || '').trim(),
+            status: dealStatus,
+            isMock: true,
+            source: 'message',
+            metadata: {
+                createdFrom: 'mock-investment-ui',
+                createdBy: req.user._id.toString(),
+                counterpartyId: String(counterparty._id)
+            },
+            lastActivityAt: new Date()
+        });
+
+        await Notification.create({
+            user: counterparty._id,
+            actor: req.user._id,
+            title: `${currentUserName} sent a mock investment proposal`,
+            message: `${currentUserName} sent ${parsedAmount.toLocaleString('en-US', { style: 'currency', currency: safeCurrencyCode })} at ${parsedEquity}% equity for ${counterpartyName}.`,
+            link: '/deals',
+            type: 'invests',
+            read: false,
+            meta: {
+                dealId: deal._id.toString(),
+                roomId
+            }
+        });
+
+        const populatedDeal = await Deal.findById(deal._id)
+            .populate('investor', 'username email avatarUrl type about address position industries createdAt')
+            .populate('startup', 'username email avatarUrl type about address position industries createdAt')
+            .lean();
+
+        return res.status(201).json({
+            deal: formatDeal(populatedDeal)
+        });
+    } catch (err) {
+        return res.status(500).json({ error: 'Failed to create deal' });
+    }
+});
+
+module.exports = router;

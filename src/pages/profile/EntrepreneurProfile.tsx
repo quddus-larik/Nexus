@@ -25,7 +25,9 @@ export const EntrepreneurProfile: React.FC = () => {
     startupName: '',
     industry: '',
     location: '',
-    pitchSummary: ''
+    pitchSummary: '',
+    teamSize: 0,
+    teamMembers: [] as Array<{ name: string; role: string; type: number }>
   });
 
   const apiBaseUrl = import.meta.env.VITE_API_URL as string | undefined;
@@ -50,11 +52,11 @@ export const EntrepreneurProfile: React.FC = () => {
     setIsLoading(true);
     setError(null);
 
-    fetch(`${apiBaseUrl}/users/${id}`, { headers: authHeader })
+    fetch(`${apiBaseUrl}/entrepreneur/${id}`)
       .then(async response => {
         const data = await response.json().catch(() => ({}));
         if (!response.ok) {
-          throw new Error(data.message || data.error || 'Failed to load entrepreneur');
+          throw new Error(data.error || data.message || 'Failed to load entrepreneur');
         }
         return data as Entrepreneur;
       })
@@ -65,7 +67,7 @@ export const EntrepreneurProfile: React.FC = () => {
         setError(err instanceof Error ? err.message : 'Failed to load entrepreneur');
       })
       .finally(() => setIsLoading(false));
-  }, [apiBaseUrl, authHeader, id]);
+  }, [apiBaseUrl, id]);
 
   useEffect(() => {
     if (!entrepreneur) {
@@ -77,7 +79,9 @@ export const EntrepreneurProfile: React.FC = () => {
       startupName: entrepreneur.startupName || '',
       industry: entrepreneur.industry || '',
       location: entrepreneur.location || '',
-      pitchSummary: entrepreneur.pitchSummary || entrepreneur.bio || ''
+      pitchSummary: entrepreneur.pitchSummary || entrepreneur.bio || '',
+      teamSize: entrepreneur.teamSize || 0,
+      teamMembers: entrepreneur.teamMembers || []
     });
   }, [entrepreneur]);
 
@@ -94,7 +98,9 @@ export const EntrepreneurProfile: React.FC = () => {
       position: formState.startupName.trim(),
       industries: formState.industry ? [formState.industry.trim()] : [],
       address: formState.location.trim(),
-      about: formState.pitchSummary.trim()
+      about: formState.pitchSummary.trim(),
+      teamMembers: formState.teamMembers.filter(member => member.name && member.role && typeof member.type === 'number'),
+      teamSize: formState.teamSize || 0
     };
 
     try {
@@ -115,7 +121,9 @@ export const EntrepreneurProfile: React.FC = () => {
         startupName: entrepreneur.startupName || '',
         industry: entrepreneur.industry || '',
         location: entrepreneur.location || '',
-        pitchSummary: entrepreneur.pitchSummary || entrepreneur.bio || ''
+        pitchSummary: entrepreneur.pitchSummary || entrepreneur.bio || '',
+        teamSize: entrepreneur.teamSize || 1,
+        teamMembers: entrepreneur.teamMembers || []
       });
     }
     setFormError(null);
@@ -156,6 +164,9 @@ export const EntrepreneurProfile: React.FC = () => {
   
   const isCurrentUser = currentUser?.id === entrepreneur.id;
   const isInvestor = currentUser?.role === 'investor';
+  
+  // Compute effective team size from database or team members length
+  const effectiveTeamSize = entrepreneur.teamSize;
   
   // Check if the current investor has already sent a request to this entrepreneur
   const hasRequestedCollaboration = isInvestor && id 
@@ -208,7 +219,7 @@ export const EntrepreneurProfile: React.FC = () => {
                 </Badge>
                 <Badge variant="secondary">
                   <Users size={14} className="mr-1" />
-                  {entrepreneur.teamSize || 1} team members
+                  {effectiveTeamSize} team members
                 </Badge>
               </div>
             </div>
@@ -280,6 +291,14 @@ export const EntrepreneurProfile: React.FC = () => {
                 label="Location"
                 value={formState.location}
                 onChange={event => setFormState(prev => ({ ...prev, location: event.target.value }))}
+                fullWidth
+              />
+              <Input
+                label="Team Size"
+                type="number"
+                min="1"
+                value={formState.teamSize}
+                onChange={event => setFormState(prev => ({ ...prev, teamSize: parseInt(event.target.value) || 1 }))}
                 fullWidth
               />
             </div>
@@ -364,55 +383,104 @@ export const EntrepreneurProfile: React.FC = () => {
           <Card>
             <CardHeader className="flex justify-between items-center">
               <h2 className="text-lg font-medium text-gray-900">Team</h2>
-              <span className="text-sm text-gray-500">{entrepreneur.teamSize || 1} members</span>
+              <span className="text-sm text-gray-500">{effectiveTeamSize} members</span>
             </CardHeader>
             <CardBody>
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                <div className="flex items-center p-3 border border-gray-200 rounded-md">
-                  <Avatar
-                    src={entrepreneur.avatarUrl}
-                    alt={entrepreneur.name}
-                    size="md"
-                    className="mr-3"
-                  />
+              {isCurrentUser && isEditing ? (
+                <div className="space-y-4">
                   <div>
-                    <h3 className="text-sm font-medium text-gray-900">{entrepreneur.name}</h3>
-                    <p className="text-xs text-gray-500">Founder & CEO</p>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">Team Members</label>
+                    <div className="space-y-3 max-h-96 overflow-y-auto">
+                      {formState.teamMembers.map((member, index) => (
+                        <div key={index} className="flex gap-2 items-end">
+                          <Input
+                            placeholder="Name"
+                            value={member.name}
+                            onChange={(e) => {
+                              const updated = [...formState.teamMembers];
+                              updated[index].name = e.target.value;
+                              setFormState(prev => ({ ...prev, teamMembers: updated }));
+                            }}
+                            fullWidth
+                          />
+                          <Input
+                            placeholder="Role (e.g., CEO, CTO, Designer)"
+                            value={member.role}
+                            onChange={(e) => {
+                              const updated = [...formState.teamMembers];
+                              updated[index].role = e.target.value;
+                              setFormState(prev => ({ ...prev, teamMembers: updated }));
+                            }}
+                            fullWidth
+                          />
+                          <Input
+                            type="number"
+                            placeholder="Type"
+                            value={member.type}
+                            onChange={(e) => {
+                              const updated = [...formState.teamMembers];
+                              updated[index].type = parseInt(e.target.value) || 0;
+                              setFormState(prev => ({ ...prev, teamMembers: updated }));
+                            }}
+                            fullWidth
+                          />
+                          <Button
+                            variant="outline"
+                            onClick={() => {
+                              const updated = formState.teamMembers.filter((_, i) => i !== index);
+                              setFormState(prev => ({ ...prev, teamMembers: updated }));
+                            }}
+                          >
+                            Remove
+                          </Button>
+                        </div>
+                      ))}
+                    </div>
+                    <Button
+                      variant="outline"
+                      onClick={() => {
+                        setFormState(prev => ({
+                          ...prev,
+                          teamMembers: [...prev.teamMembers, { name: '', role: '', type: 0 }]
+                        }));
+                      }}
+                      className="mt-2 w-full"
+                    >
+                      + Add Team Member
+                    </Button>
                   </div>
                 </div>
-                
-                <div className="flex items-center p-3 border border-gray-200 rounded-md">
-                  <Avatar
-                    src="https://images.pexels.com/photos/2379005/pexels-photo-2379005.jpeg"
-                    alt="Team Member"
-                    size="md"
-                    className="mr-3"
-                  />
-                  <div>
-                    <h3 className="text-sm font-medium text-gray-900">Alex Johnson</h3>
-                    <p className="text-xs text-gray-500">CTO</p>
-                  </div>
+              ) : (
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  {entrepreneur.teamMembers && entrepreneur.teamMembers.length > 0 ? (
+                    <>
+                      {entrepreneur.teamMembers.map((member, index) => (
+                        <div key={index} className="flex items-center justify-between p-3 border border-gray-200 rounded-md">
+                          <div className="flex items-center flex-1">
+                            <Avatar
+                              src={`https://ui-avatars.com/api/?name=${encodeURIComponent(member.name)}&background=random`}
+                              alt={member.name}
+                              size="md"
+                              className="mr-3"
+                            />
+                            <div>
+                              <h3 className="text-sm font-medium text-gray-900">{member.name}</h3>
+                              <p className="text-xs text-gray-500">{member.role}</p>
+                            </div>
+                          </div>
+                          <div className="bg-primary-100 px-2 py-1 rounded text-xs font-medium text-primary-700">
+                            Type: {member.type}
+                          </div>
+                        </div>
+                      ))}
+                    </>
+                  ) : (
+                    <div className="col-span-full text-center py-4">
+                      <p className="text-gray-500">No team members added yet</p>
+                     </div>
+                  )}
                 </div>
-                
-                <div className="flex items-center p-3 border border-gray-200 rounded-md">
-                  <Avatar
-                    src="https://images.pexels.com/photos/773371/pexels-photo-773371.jpeg"
-                    alt="Team Member"
-                    size="md"
-                    className="mr-3"
-                  />
-                  <div>
-                    <h3 className="text-sm font-medium text-gray-900">Jessica Chen</h3>
-                    <p className="text-xs text-gray-500">Head of Product</p>
-                  </div>
-                </div>
-                
-                {(entrepreneur.teamSize || 1) > 3 && (
-                  <div className="flex items-center justify-center p-3 border border-dashed border-gray-200 rounded-md">
-                    <p className="text-sm text-gray-500">+ {(entrepreneur.teamSize || 1) - 3} more team members</p>
-                  </div>
-                )}
-              </div>
+              )}
             </CardBody>
           </Card>
         </div>

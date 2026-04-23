@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
-import { Users, Bell, Calendar, TrendingUp, AlertCircle, PlusCircle } from 'lucide-react';
+import { Users, Bell, Calendar, TrendingUp, AlertCircle, PlusCircle, MessageSquare } from 'lucide-react';
 import { Button } from '../../components/ui/Button';
 import { Card, CardBody, CardHeader } from '../../components/ui/Card';
 import { Badge } from '../../components/ui/Badge';
@@ -11,16 +11,74 @@ import { CollaborationRequest } from '../../types';
 import { getRequestsForEntrepreneur } from '../../data/collaborationRequests';
 import { investors } from '../../data/users';
 
+interface DashboardStats {
+  pendingRequests: number;
+  acceptedConnections: number;
+  profileViews: number;
+  upcomingMeetings: number;
+  unreadMessages: number;
+}
+
 export const EntrepreneurDashboard: React.FC = () => {
   const { user } = useAuth();
   const [collaborationRequests, setCollaborationRequests] = useState<CollaborationRequest[]>([]);
   const [recommendedInvestors, setRecommendedInvestors] = useState(investors.slice(0, 3));
+  const [stats, setStats] = useState<DashboardStats>({
+    pendingRequests: 0,
+    acceptedConnections: 0,
+    profileViews: 0,
+    upcomingMeetings: 0,
+    unreadMessages: 0
+  });
+  const [loading, setLoading] = useState(true);
   
   useEffect(() => {
     if (user) {
       // Load collaboration requests
       const requests = getRequestsForEntrepreneur(user.id);
       setCollaborationRequests(requests);
+
+      // Fetch dashboard data from API
+      const fetchDashboardData = async () => {
+        try {
+          const token = localStorage.getItem('business_nexus_access_token');
+          if (!token) return;
+
+          // Fetch user profile data
+          const response = await fetch(`${import.meta.env.VITE_API_URL}/users/update/${user.id}`, {
+            headers: {
+              'Authorization': `Bearer ${token}`
+            }
+          });
+
+          if (response.ok) {
+            const userData = await response.json();
+            
+            // Update stats based on fetched data
+            setStats(prev => ({
+              ...prev,
+              pendingRequests: requests.filter(r => r.status === 'pending').length,
+              acceptedConnections: requests.filter(r => r.status === 'accepted').length,
+              profileViews: userData.profileViews || 24,
+              upcomingMeetings: userData.upcomingMeetings || 2,
+              unreadMessages: userData.unreadMessages || 0
+            }));
+          }
+        } catch (error) {
+          console.error('Error fetching dashboard data:', error);
+          
+          // Set default stats if fetch fails
+          setStats(prev => ({
+            ...prev,
+            pendingRequests: requests.filter(r => r.status === 'pending').length,
+            acceptedConnections: requests.filter(r => r.status === 'accepted').length
+          }));
+        } finally {
+          setLoading(false);
+        }
+      };
+
+      fetchDashboardData();
     }
   }, [user]);
   
@@ -30,10 +88,20 @@ export const EntrepreneurDashboard: React.FC = () => {
         req.id === requestId ? { ...req, status } : req
       )
     );
+    
+    // Update stats
+    const newRequests = collaborationRequests.map(req => 
+      req.id === requestId ? { ...req, status } : req
+    );
+    setStats(prev => ({
+      ...prev,
+      pendingRequests: newRequests.filter(r => r.status === 'pending').length,
+      acceptedConnections: newRequests.filter(r => r.status === 'accepted').length
+    }));
   };
   
   if (!user) return null;
-  
+
   const pendingRequests = collaborationRequests.filter(req => req.status === 'pending');
   
   return (
@@ -54,7 +122,7 @@ export const EntrepreneurDashboard: React.FC = () => {
       </div>
       
       {/* Summary cards */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4">
         <Card className="bg-primary-50 border border-primary-100">
           <CardBody>
             <div className="flex items-center">
@@ -63,7 +131,7 @@ export const EntrepreneurDashboard: React.FC = () => {
               </div>
               <div>
                 <p className="text-sm font-medium text-primary-700">Pending Requests</p>
-                <h3 className="text-xl font-semibold text-primary-900">{pendingRequests.length}</h3>
+                <h3 className="text-xl font-semibold text-primary-900">{stats.pendingRequests}</h3>
               </div>
             </div>
           </CardBody>
@@ -78,7 +146,7 @@ export const EntrepreneurDashboard: React.FC = () => {
               <div>
                 <p className="text-sm font-medium text-secondary-700">Total Connections</p>
                 <h3 className="text-xl font-semibold text-secondary-900">
-                  {collaborationRequests.filter(req => req.status === 'accepted').length}
+                  {stats.acceptedConnections}
                 </h3>
               </div>
             </div>
@@ -93,7 +161,7 @@ export const EntrepreneurDashboard: React.FC = () => {
               </div>
               <div>
                 <p className="text-sm font-medium text-accent-700">Upcoming Meetings</p>
-                <h3 className="text-xl font-semibold text-accent-900">2</h3>
+                <h3 className="text-xl font-semibold text-accent-900">{stats.upcomingMeetings}</h3>
               </div>
             </div>
           </CardBody>
@@ -107,7 +175,21 @@ export const EntrepreneurDashboard: React.FC = () => {
               </div>
               <div>
                 <p className="text-sm font-medium text-success-700">Profile Views</p>
-                <h3 className="text-xl font-semibold text-success-900">24</h3>
+                <h3 className="text-xl font-semibold text-success-900">{stats.profileViews}</h3>
+              </div>
+            </div>
+          </CardBody>
+        </Card>
+
+        <Card className="bg-blue-50 border border-blue-100">
+          <CardBody>
+            <div className="flex items-center">
+              <div className="p-3 bg-blue-100 rounded-full mr-4">
+                <MessageSquare size={20} className="text-blue-700" />
+              </div>
+              <div>
+                <p className="text-sm font-medium text-blue-700">Unread Messages</p>
+                <h3 className="text-xl font-semibold text-blue-900">{stats.unreadMessages}</h3>
               </div>
             </div>
           </CardBody>

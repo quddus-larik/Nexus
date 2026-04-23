@@ -13,6 +13,7 @@ const buildUserPayload = (user) => {
   const industries = Array.isArray(user.industries) ? user.industries : [];
   const investmentStages = Array.isArray(user.investmantStages) ? user.investmantStages : [];
   const collaborations = Array.isArray(user.collaborations) ? user.collaborations : [];
+  const teamMembers = Array.isArray(user.teamMembers) ? user.teamMembers : [];
   const role = normalizeRole(user.type);
 
   const base = {
@@ -47,7 +48,8 @@ const buildUserPayload = (user) => {
     industry: industries[0] || '',
     location: user.address || '',
     foundedYear: user.createdAt ? new Date(user.createdAt).getFullYear() : new Date().getFullYear(),
-    teamSize: 1
+    teamSize: user.teamSize || teamMembers.length || 1,
+    teamMembers
   };
 };
 
@@ -100,6 +102,16 @@ const buildProfileUpdates = (body) => {
   const investmentStages = normalizeStringArray(body.investmantStages);
   if (investmentStages !== undefined) {
     updates.investmantStages = investmentStages;
+  }
+
+  if (Array.isArray(body.teamMembers)) {
+    updates.teamMembers = body.teamMembers.filter(member => 
+      member && typeof member === 'object' && member.name && member.role && typeof member.type === 'number'
+    );
+  }
+
+  if (typeof body.teamSize === 'number' && body.teamSize >= 1) {
+    updates.teamSize = body.teamSize;
   }
 
   return updates;
