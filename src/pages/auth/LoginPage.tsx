@@ -34,10 +34,10 @@ export const LoginPage: React.FC = () => {
   // For demo purposes, pre-filled credentials
   const fillDemoCredentials = (userRole: UserRole) => {
     if (userRole === 'entrepreneur') {
-      setEmail('sarah@techwave.io');
-      setPassword('password123');
+      setEmail('hell@gg.io');
+      setPassword('pass');
     } else {
-      setEmail('michael@vcinnovate.com');
+      setEmail('demo@gg.com');
       setPassword('password123');
     }
     setRole(userRole);
