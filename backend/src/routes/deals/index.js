@@ -6,11 +6,50 @@ const Notification = require('../../models/notifications.model');
 const User = require('../../models/user.model');
 
 const router = express.Router();
+const DEAL_STATUSES = ['Proposed', 'Due Diligence', 'Term Sheet', 'Negotiation', 'Closed', 'Passed'];
 
 const buildAvatarUrl = (displayName) =>
     `https://ui-avatars.com/api/?name=${encodeURIComponent(displayName || 'User')}&background=random`;
 
 const buildDisplayName = (user) => user?.username || user?.email?.split('@')[0] || 'User';
+
+const buildNotificationActor = (user) => {
+    if (!user) {
+        return null;
+    }
+
+    const displayName = buildDisplayName(user);
+
+    return {
+        id: user._id?.toString?.() || user.id?.toString?.() || String(user._id || user.id || ''),
+        name: displayName,
+        avatarUrl: user.avatarUrl || buildAvatarUrl(displayName)
+    };
+};
+
+const buildNotificationPayload = (notification, actor) => ({
+    id: notification._id?.toString?.() || String(notification._id),
+    userId: notification.user?.toString?.() || String(notification.user),
+    actor: buildNotificationActor(actor),
+    title: notification.title,
+    message: notification.message,
+    link: notification.link,
+    type: notification.type,
+    read: Boolean(notification.read),
+    meta: notification.meta || {},
+    createdAt: notification.createdAt,
+    updatedAt: notification.updatedAt
+});
+
+const emitNotification = (req, notification, actor, recipientId) => {
+    const io = req.app.get('io');
+
+    if (!io || !recipientId) {
+        return;
+    }
+
+    io.to(`user:${recipientId}`).emit('notification:received', buildNotificationPayload(notification, actor));
+};
 
 const buildPartyPayload = (user) => {
     if (!user) {
@@ -64,8 +103,7 @@ const parseEquity = (value) => {
 };
 
 const getValidatedStatus = (status) => {
-    const allowed = ['Proposed', 'Due Diligence', 'Term Sheet', 'Negotiation', 'Closed', 'Passed'];
-    return allowed.includes(status) ? status : 'Proposed';
+    return DEAL_STATUSES.includes(status) ? status : 'Proposed';
 };
 
 const getSafeCurrencyCode = (currency) => {
@@ -228,19 +266,25 @@ router.post('/', async (req, res) => {
             lastActivityAt: new Date()
         });
 
-        await Notification.create({
-            user: counterparty._id,
-            actor: req.user._id,
-            title: `${currentUserName} sent a mock investment proposal`,
-            message: `${currentUserName} sent ${parsedAmount.toLocaleString('en-US', { style: 'currency', currency: safeCurrencyCode })} at ${parsedEquity}% equity for ${counterpartyName}.`,
-            link: '/deals',
-            type: 'invests',
-            read: false,
-            meta: {
-                dealId: deal._id.toString(),
-                roomId
-            }
-        });
+        try {
+            const notification = await Notification.create({
+                user: counterparty._id,
+                actor: req.user._id,
+                title: `${currentUserName} sent a mock investment proposal`,
+                message: `${currentUserName} sent ${parsedAmount.toLocaleString('en-US', { style: 'currency', currency: safeCurrencyCode })} at ${parsedEquity}% equity for ${counterpartyName}.`,
+                link: '/deals',
+                type: 'invests',
+                read: false,
+                meta: {
+                    dealId: deal._id.toString(),
+                    roomId
+                }
+            });
+
+            emitNotification(req, notification, req.user, counterparty._id.toString());
+        } catch (notificationError) {
+            console.error('Deal notification create error:', notificationError);
+        }
 
         const populatedDeal = await Deal.findById(deal._id)
             .populate('investor', 'username email avatarUrl type about address position industries createdAt')
@@ -252,6 +296,76 @@ router.post('/', async (req, res) => {
         });
     } catch (err) {
         return res.status(500).json({ error: 'Failed to create deal' });
+    }
+});
+
+router.patch('/:dealId/status', async (req, res) => {
+    try {
+        const { dealId } = req.params;
+        const { status } = req.body || {};
+
+        if (!DEAL_STATUSES.includes(status)) {
+            return res.status(400).json({ error: 'Valid deal status is required' });
+        }
+
+        const deal = await Deal.findById(dealId);
+        if (!deal) {
+            return res.status(404).json({ error: 'Deal not found' });
+        }
+
+        const isInvestor = String(deal.investor) === String(req.user._id);
+        const isStartup = String(deal.startup) === String(req.user._id);
+
+        if (!isInvestor && !isStartup) {
+            return res.status(403).json({ error: 'You can only update your own deals' });
+        }
+
+        const counterpartyId = isInvestor ? deal.startup : deal.investor;
+        const counterparty = await User.findById(counterpartyId).lean();
+        const currentUserName = buildDisplayName(req.user);
+        const counterpartyName = buildDisplayName(counterparty);
+        const updatedAt = new Date();
+
+        deal.status = status;
+        deal.lastActivityAt = updatedAt;
+        deal.metadata = {
+            ...(deal.metadata && typeof deal.metadata === 'object' ? deal.metadata : {}),
+            statusUpdatedBy: req.user._id.toString(),
+            statusUpdatedAt: updatedAt.toISOString()
+        };
+
+        await deal.save();
+
+        try {
+            const notification = await Notification.create({
+                user: counterpartyId,
+                actor: req.user._id,
+                title: `${currentUserName} moved a deal to ${status}`,
+                message: `${currentUserName} updated the deal with ${counterpartyName} to ${status}.`,
+                link: '/deals',
+                type: 'invests',
+                read: false,
+                meta: {
+                    dealId: deal._id.toString(),
+                    status
+                }
+            });
+
+            emitNotification(req, notification, req.user, counterpartyId.toString());
+        } catch (notificationError) {
+            console.error('Deal status notification create error:', notificationError);
+        }
+
+        const populatedDeal = await Deal.findById(deal._id)
+            .populate('investor', 'username email avatarUrl type about address position industries createdAt')
+            .populate('startup', 'username email avatarUrl type about address position industries createdAt')
+            .lean();
+
+        return res.status(200).json({
+            deal: formatDeal(populatedDeal)
+        });
+    } catch (err) {
+        return res.status(500).json({ error: 'Failed to update deal status' });
     }
 });
 

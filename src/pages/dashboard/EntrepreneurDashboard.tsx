@@ -1,181 +1,192 @@
-import React, { useState, useEffect } from 'react';
-import { Link } from 'react-router-dom';
-import { Users, Bell, Calendar, TrendingUp, AlertCircle, PlusCircle, MessageSquare } from 'lucide-react';
-import { Button } from '../../components/ui/Button';
+import React, { useCallback, useEffect, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
+import { ArrowRight, Bell, DollarSign, MessageSquare, TrendingUp, Users } from 'lucide-react';
 import { Card, CardBody, CardHeader } from '../../components/ui/Card';
 import { Badge } from '../../components/ui/Badge';
-import { CollaborationRequestCard } from '../../components/collaboration/CollaborationRequestCard';
+import { Button } from '../../components/ui/Button';
 import { InvestorCard } from '../../components/investor/InvestorCard';
 import { useAuth } from '../../context/AuthContext';
-import { CollaborationRequest } from '../../types';
-import { getRequestsForEntrepreneur } from '../../data/collaborationRequests';
-import { investors } from '../../data/users';
+import { Investor } from '../../types';
+import {
+  DASHBOARD_TOKEN_KEY,
+  DashboardStats,
+  DashboardWarmContact,
+  fetchDashboardSummary
+} from './dashboardApi';
+import { WarmContactCard } from '../../components/dashboard/WarmContactCard';
 
-interface DashboardStats {
-  pendingRequests: number;
-  acceptedConnections: number;
-  profileViews: number;
-  upcomingMeetings: number;
-  unreadMessages: number;
-}
+const DEFAULT_STATS: DashboardStats = {
+  warmContactsCount: 0,
+  activeDealsCount: 0,
+  closedDealsCount: 0,
+  unreadMessagesCount: 0,
+  unreadNotificationsCount: 0
+};
 
 export const EntrepreneurDashboard: React.FC = () => {
   const { user } = useAuth();
-  const [collaborationRequests, setCollaborationRequests] = useState<CollaborationRequest[]>([]);
-  const [recommendedInvestors, setRecommendedInvestors] = useState(investors.slice(0, 3));
-  const [stats, setStats] = useState<DashboardStats>({
-    pendingRequests: 0,
-    acceptedConnections: 0,
-    profileViews: 0,
-    upcomingMeetings: 0,
-    unreadMessages: 0
-  });
+  const navigate = useNavigate();
+  const [stats, setStats] = useState<DashboardStats>(DEFAULT_STATS);
+  const [warmContacts, setWarmContacts] = useState<DashboardWarmContact[]>([]);
+  const [recommendedInvestors, setRecommendedInvestors] = useState<Investor[]>([]);
   const [loading, setLoading] = useState(true);
-  
-  useEffect(() => {
-    if (user) {
-      // Load collaboration requests
-      const requests = getRequestsForEntrepreneur(user.id);
-      setCollaborationRequests(requests);
+  const [error, setError] = useState<string | null>(null);
 
-      // Fetch dashboard data from API
-      const fetchDashboardData = async () => {
-        try {
-          const token = localStorage.getItem('business_nexus_access_token');
-          if (!token) return;
-
-          // Fetch user profile data
-          const response = await fetch(`${import.meta.env.VITE_API_URL}/users/update/${user.id}`, {
-            headers: {
-              'Authorization': `Bearer ${token}`
-            }
-          });
-
-          if (response.ok) {
-            const userData = await response.json();
-            
-            // Update stats based on fetched data
-            setStats(prev => ({
-              ...prev,
-              pendingRequests: requests.filter(r => r.status === 'pending').length,
-              acceptedConnections: requests.filter(r => r.status === 'accepted').length,
-              profileViews: userData.profileViews || 24,
-              upcomingMeetings: userData.upcomingMeetings || 2,
-              unreadMessages: userData.unreadMessages || 0
-            }));
-          }
-        } catch (error) {
-          console.error('Error fetching dashboard data:', error);
-          
-          // Set default stats if fetch fails
-          setStats(prev => ({
-            ...prev,
-            pendingRequests: requests.filter(r => r.status === 'pending').length,
-            acceptedConnections: requests.filter(r => r.status === 'accepted').length
-          }));
-        } finally {
-          setLoading(false);
-        }
-      };
-
-      fetchDashboardData();
+  const loadDashboard = useCallback(async () => {
+    if (!user?.id) {
+      return;
     }
-  }, [user]);
-  
-  const handleRequestStatusUpdate = (requestId: string, status: 'accepted' | 'rejected') => {
-    setCollaborationRequests(prevRequests => 
-      prevRequests.map(req => 
-        req.id === requestId ? { ...req, status } : req
-      )
-    );
-    
-    // Update stats
-    const newRequests = collaborationRequests.map(req => 
-      req.id === requestId ? { ...req, status } : req
-    );
-    setStats(prev => ({
-      ...prev,
-      pendingRequests: newRequests.filter(r => r.status === 'pending').length,
-      acceptedConnections: newRequests.filter(r => r.status === 'accepted').length
-    }));
-  };
-  
-  if (!user) return null;
 
-  const pendingRequests = collaborationRequests.filter(req => req.status === 'pending');
-  
+    const token = localStorage.getItem(DASHBOARD_TOKEN_KEY);
+    if (!token) {
+      setError('You need to sign in to view the dashboard.');
+      setLoading(false);
+      return;
+    }
+
+    setLoading(true);
+    setError(null);
+
+    try {
+      const data = await fetchDashboardSummary(token);
+      const nextWarmContacts = (data.warmContacts || []).filter(
+        (contact) => contact.role === 'investor'
+      );
+      const nextRecommendedInvestors = (data.recommendedUsers || []).filter(
+        (item): item is Investor => Boolean(item && item.role === 'investor')
+      );
+
+      setStats({ ...DEFAULT_STATS, ...(data.stats || {}) });
+      setWarmContacts(nextWarmContacts);
+      setRecommendedInvestors(nextRecommendedInvestors);
+    } catch (err) {
+      setError((err as Error).message);
+      setStats(DEFAULT_STATS);
+      setWarmContacts([]);
+      setRecommendedInvestors([]);
+    } finally {
+      setLoading(false);
+    }
+  }, [user?.id]);
+
+  useEffect(() => {
+    if (!user?.id) {
+      return;
+    }
+
+    void loadDashboard();
+  }, [user?.id, loadDashboard]);
+
+  if (!user) {
+    return null;
+  }
+
   return (
     <div className="space-y-6 animate-fade-in">
-      <div className="flex justify-between items-center">
-        <div>
-          <h1 className="text-2xl font-bold text-gray-900">Welcome, {user.name}</h1>
-          <p className="text-gray-600">Here's what's happening with your startup today</p>
+      <div className="relative overflow-hidden rounded-3xl bg-gradient-to-br from-slate-950 via-slate-900 to-primary-900 p-6 text-white shadow-xl md:p-8">
+        <div className="absolute -right-16 top-0 h-56 w-56 rounded-full bg-white/10 blur-3xl" />
+        <div className="absolute bottom-0 left-1/3 h-40 w-40 rounded-full bg-primary-400/20 blur-3xl" />
+
+        <div className="relative flex flex-col gap-6 lg:flex-row lg:items-end lg:justify-between">
+          <div className="max-w-3xl space-y-4">
+            <div className="flex flex-wrap items-center gap-2">
+              <Badge variant="warning" rounded>
+                Live data
+              </Badge>
+              <Badge variant="gray" rounded>
+                MongoDB-backed
+              </Badge>
+            </div>
+
+            <div>
+              <h1 className="text-3xl font-bold tracking-tight md:text-4xl">
+                Welcome, {user.name}
+              </h1>
+              <p className="mt-3 max-w-2xl text-sm text-white/80 md:text-base">
+                MongoDB-backed view of warm investors, active deals, and unread activity pulled from your
+                messages, deals, and notifications.
+              </p>
+            </div>
+
+            <div className="flex flex-wrap gap-3">
+              <Button
+                variant="secondary"
+                size="sm"
+                onClick={() => navigate('/investors')}
+                rightIcon={<ArrowRight size={16} />}
+              >
+                Browse Investors
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                className="border-white/20 text-white hover:bg-white/10"
+                onClick={() => navigate('/deals')}
+                leftIcon={<DollarSign size={16} />}
+              >
+                Open Deals
+              </Button>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-2 gap-3 md:min-w-[420px]">
+            <Card className="border-white/10 bg-white/10 text-white shadow-none">
+              <CardBody className="p-4">
+                <div className="flex items-center gap-3">
+                  <div className="rounded-2xl bg-white/10 p-3">
+                    <Users size={18} />
+                  </div>
+                  <div>
+                    <p className="text-xs uppercase tracking-[0.2em] text-white/60">Warm investors</p>
+                    <p className="text-lg font-semibold">{loading ? '...' : stats.warmContactsCount}</p>
+                  </div>
+                </div>
+              </CardBody>
+            </Card>
+
+            <Card className="border-white/10 bg-white/10 text-white shadow-none">
+              <CardBody className="p-4">
+                <div className="flex items-center gap-3">
+                  <div className="rounded-2xl bg-white/10 p-3">
+                    <TrendingUp size={18} />
+                  </div>
+                  <div>
+                    <p className="text-xs uppercase tracking-[0.2em] text-white/60">Active deals</p>
+                    <p className="text-lg font-semibold">{loading ? '...' : stats.activeDealsCount}</p>
+                  </div>
+                </div>
+              </CardBody>
+            </Card>
+          </div>
         </div>
-        
-        <Link to="/investors">
-          <Button
-            leftIcon={<PlusCircle size={18} />}
-          >
-            Find Investors
-          </Button>
-        </Link>
       </div>
-      
-      {/* Summary cards */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4">
-        <Card className="bg-primary-50 border border-primary-100">
-          <CardBody>
-            <div className="flex items-center">
-              <div className="p-3 bg-primary-100 rounded-full mr-4">
-                <Bell size={20} className="text-primary-700" />
-              </div>
-              <div>
-                <p className="text-sm font-medium text-primary-700">Pending Requests</p>
-                <h3 className="text-xl font-semibold text-primary-900">{stats.pendingRequests}</h3>
-              </div>
+
+      {error && (
+        <Card className="border border-red-200 bg-red-50">
+          <CardBody className="flex items-center justify-between gap-4 p-4">
+            <div>
+              <h2 className="font-medium text-red-900">Unable to load dashboard</h2>
+              <p className="mt-1 text-sm text-red-700">{error}</p>
             </div>
+            <Button variant="outline" size="sm" onClick={() => void loadDashboard()}>
+              Retry
+            </Button>
           </CardBody>
         </Card>
-        
-        <Card className="bg-secondary-50 border border-secondary-100">
-          <CardBody>
-            <div className="flex items-center">
-              <div className="p-3 bg-secondary-100 rounded-full mr-4">
-                <Users size={20} className="text-secondary-700" />
-              </div>
-              <div>
-                <p className="text-sm font-medium text-secondary-700">Total Connections</p>
-                <h3 className="text-xl font-semibold text-secondary-900">
-                  {stats.acceptedConnections}
-                </h3>
-              </div>
-            </div>
-          </CardBody>
-        </Card>
-        
-        <Card className="bg-accent-50 border border-accent-100">
-          <CardBody>
-            <div className="flex items-center">
-              <div className="p-3 bg-accent-100 rounded-full mr-4">
-                <Calendar size={20} className="text-accent-700" />
-              </div>
-              <div>
-                <p className="text-sm font-medium text-accent-700">Upcoming Meetings</p>
-                <h3 className="text-xl font-semibold text-accent-900">{stats.upcomingMeetings}</h3>
-              </div>
-            </div>
-          </CardBody>
-        </Card>
-        
+      )}
+
+      <div className="grid gap-4 md:grid-cols-3">
         <Card className="bg-success-50 border border-success-100">
           <CardBody>
             <div className="flex items-center">
-              <div className="p-3 bg-green-100 rounded-full mr-4">
-                <TrendingUp size={20} className="text-success-700" />
+              <div className="p-3 bg-success-100 rounded-full mr-4">
+                <DollarSign size={20} className="text-success-700" />
               </div>
               <div>
-                <p className="text-sm font-medium text-success-700">Profile Views</p>
-                <h3 className="text-xl font-semibold text-success-900">{stats.profileViews}</h3>
+                <p className="text-sm font-medium text-success-700">Closed deals</p>
+                <h3 className="text-xl font-semibold text-success-900">
+                  {loading ? '...' : stats.closedDealsCount}
+                </h3>
               </div>
             </div>
           </CardBody>
@@ -188,68 +199,139 @@ export const EntrepreneurDashboard: React.FC = () => {
                 <MessageSquare size={20} className="text-blue-700" />
               </div>
               <div>
-                <p className="text-sm font-medium text-blue-700">Unread Messages</p>
-                <h3 className="text-xl font-semibold text-blue-900">{stats.unreadMessages}</h3>
+                <p className="text-sm font-medium text-blue-700">Unread messages</p>
+                <h3 className="text-xl font-semibold text-blue-900">
+                  {loading ? '...' : stats.unreadMessagesCount}
+                </h3>
+              </div>
+            </div>
+          </CardBody>
+        </Card>
+
+        <Card className="bg-warning-50 border border-warning-100">
+          <CardBody>
+            <div className="flex items-center">
+              <div className="p-3 bg-warning-100 rounded-full mr-4">
+                <Bell size={20} className="text-warning-700" />
+              </div>
+              <div>
+                <p className="text-sm font-medium text-warning-700">Unread notifications</p>
+                <h3 className="text-xl font-semibold text-warning-900">
+                  {loading ? '...' : stats.unreadNotificationsCount}
+                </h3>
               </div>
             </div>
           </CardBody>
         </Card>
       </div>
-      
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* Collaboration requests */}
-        <div className="lg:col-span-2 space-y-4">
-          <Card>
-            <CardHeader className="flex justify-between items-center">
-              <h2 className="text-lg font-medium text-gray-900">Collaboration Requests</h2>
-              <Badge variant="primary">{pendingRequests.length} pending</Badge>
-            </CardHeader>
-            
-            <CardBody>
-              {collaborationRequests.length > 0 ? (
-                <div className="space-y-4">
-                  {collaborationRequests.map(request => (
-                    <CollaborationRequestCard
-                      key={request.id}
-                      request={request}
-                      onStatusUpdate={handleRequestStatusUpdate}
-                    />
-                  ))}
+
+      {error && !loading ? null : null}
+
+      <div className="grid gap-6 xl:grid-cols-[1.05fr_0.95fr]">
+        <Card>
+          <CardHeader className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
+            <div>
+              <h2 className="text-lg font-semibold text-gray-900">Warm investors who already messaged you</h2>
+              <p className="text-sm text-gray-600">
+                Only investors with an existing conversation appear here.
+              </p>
+            </div>
+            <div className="flex items-center gap-2 text-sm text-gray-500">
+              <span>{loading ? '...' : warmContacts.length} contacts</span>
+              <span className="text-gray-300">•</span>
+              <span>{stats.activeDealsCount} active deals</span>
+            </div>
+          </CardHeader>
+
+          <CardBody className="p-4 md:p-6">
+            {loading ? (
+              <div className="flex h-56 items-center justify-center rounded-2xl border border-dashed border-gray-200 bg-gray-50">
+                <div className="flex flex-col items-center">
+                  <div className="mb-3 h-10 w-10 animate-spin rounded-full border-b-2 border-primary-600" />
+                  <p className="text-sm text-gray-500">Loading warm contacts...</p>
                 </div>
-              ) : (
-                <div className="text-center py-8">
-                  <div className="inline-flex items-center justify-center w-16 h-16 rounded-full bg-gray-100 mb-4">
-                    <AlertCircle size={24} className="text-gray-500" />
-                  </div>
-                  <p className="text-gray-600">No collaboration requests yet</p>
-                  <p className="text-sm text-gray-500 mt-1">When investors are interested in your startup, their requests will appear here</p>
+              </div>
+            ) : warmContacts.length > 0 ? (
+              <div className="grid gap-4">
+                {warmContacts.map((contact) => (
+                  <WarmContactCard
+                    key={contact.id}
+                    contact={contact}
+                    profilePath={`/profile/investor/${contact.id}`}
+                  />
+                ))}
+              </div>
+            ) : (
+              <div className="flex h-56 flex-col items-center justify-center rounded-2xl border border-dashed border-gray-200 bg-gray-50 px-6 text-center">
+                <div className="mb-4 rounded-full bg-white p-4 shadow-sm">
+                  <Users size={32} className="text-gray-400" />
                 </div>
-              )}
-            </CardBody>
-          </Card>
-        </div>
-        
-        {/* Recommended investors */}
-        <div className="space-y-4">
-          <Card>
-            <CardHeader className="flex justify-between items-center">
-              <h2 className="text-lg font-medium text-gray-900">Recommended Investors</h2>
-              <Link to="/investors" className="text-sm font-medium text-primary-600 hover:text-primary-500">
-                View all
-              </Link>
-            </CardHeader>
-            
-            <CardBody className="space-y-4">
-              {recommendedInvestors.map(investor => (
-                <InvestorCard
-                  key={investor.id}
-                  investor={investor}
-                  showActions={false}
-                />
-              ))}
-            </CardBody>
-          </Card>
-        </div>
+                <h3 className="text-lg font-semibold text-gray-900">No warm investors yet</h3>
+                <p className="mt-2 max-w-md text-sm text-gray-600">
+                  Message an investor first. Once the conversation exists, they will appear here and unlock
+                  the connected dashboard view.
+                </p>
+                <div className="mt-4 flex flex-wrap justify-center gap-3">
+                  <Button variant="primary" size="sm" onClick={() => navigate('/investors')}>
+                    Browse Investors
+                  </Button>
+                  <Button variant="outline" size="sm" onClick={() => navigate('/messages')}>
+                    Open Messages
+                  </Button>
+                </div>
+              </div>
+            )}
+          </CardBody>
+        </Card>
+
+        <Card>
+          <CardHeader className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
+            <div>
+              <h2 className="text-lg font-semibold text-gray-900">Recommended investors</h2>
+              <p className="text-sm text-gray-600">
+                Active investor profiles pulled from the database.
+              </p>
+            </div>
+            <Button variant="ghost" size="sm" onClick={() => navigate('/investors')}>
+              View all
+            </Button>
+          </CardHeader>
+
+          <CardBody className="p-4 md:p-6">
+            {loading ? (
+              <div className="flex h-56 items-center justify-center rounded-2xl border border-dashed border-gray-200 bg-gray-50">
+                <div className="flex flex-col items-center">
+                  <div className="mb-3 h-10 w-10 animate-spin rounded-full border-b-2 border-primary-600" />
+                  <p className="text-sm text-gray-500">Loading investors...</p>
+                </div>
+              </div>
+            ) : recommendedInvestors.length > 0 ? (
+              <div className="grid gap-6 md:grid-cols-2">
+                {recommendedInvestors.map((investor) => (
+                  <InvestorCard key={investor.id} investor={investor} />
+                ))}
+              </div>
+            ) : (
+              <div className="flex h-56 flex-col items-center justify-center rounded-2xl border border-dashed border-gray-200 bg-gray-50 px-6 text-center">
+                <div className="mb-4 rounded-full bg-white p-4 shadow-sm">
+                  <TrendingUp size={32} className="text-gray-400" />
+                </div>
+                <h3 className="text-lg font-semibold text-gray-900">No investors to recommend</h3>
+                <p className="mt-2 max-w-md text-sm text-gray-600">
+                  New investor profiles will appear here as soon as they are saved in MongoDB.
+                </p>
+                <div className="mt-4 flex flex-wrap justify-center gap-3">
+                  <Button variant="primary" size="sm" onClick={() => navigate('/investors')}>
+                    Browse Investors
+                  </Button>
+                  <Button variant="outline" size="sm" onClick={() => navigate('/deals')}>
+                    Open Deals
+                  </Button>
+                </div>
+              </div>
+            )}
+          </CardBody>
+        </Card>
       </div>
     </div>
   );

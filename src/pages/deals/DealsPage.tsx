@@ -24,6 +24,7 @@ const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8080';
 const TOKEN_KEY = 'business_nexus_access_token';
 const DEAL_STATUSES = ['Proposed', 'Due Diligence', 'Term Sheet', 'Negotiation', 'Closed', 'Passed'] as const;
 const ROUND_OPTIONS = ['Pre-seed', 'Seed', 'Series A', 'Series B', 'Growth'] as const;
+const CURRENCY_OPTIONS = ['USD'] as const;
 
 type DealStatus = (typeof DEAL_STATUSES)[number];
 
@@ -144,6 +145,7 @@ interface DealCreateResponse {
 
 interface DealFormState {
   amount: string;
+  currency: string;
   equity: string;
   round: string;
   status: DealStatus;
@@ -160,6 +162,9 @@ const getSafeCurrencyCode = (currency?: string) => {
   const code = String(currency || 'USD').trim().toUpperCase();
   return /^[A-Z]{3}$/.test(code) ? code : 'USD';
 };
+
+const getCounterpartyPhrase = (label: string) =>
+  label.toLowerCase().startsWith('i') ? 'an investor' : 'a startup';
 
 const fetchJson = async <T,>(
   path: string,
@@ -326,10 +331,12 @@ export const DealsPage: React.FC = () => {
   const [selectedStatuses, setSelectedStatuses] = useState<DealStatus[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [updatingDealId, setUpdatingDealId] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
   const [form, setForm] = useState<DealFormState>({
     amount: '50000',
+    currency: 'USD',
     equity: '5',
     round: 'Seed',
     status: 'Proposed',
@@ -469,7 +476,7 @@ export const DealsPage: React.FC = () => {
     }
 
     if (!selectedContact) {
-      setError(`Message a ${counterpartyLabel.toLowerCase()} before creating a deal.`);
+      setError(`Message ${getCounterpartyPhrase(counterpartyLabel)} before creating a deal.`);
       return;
     }
 
@@ -486,6 +493,8 @@ export const DealsPage: React.FC = () => {
       return;
     }
 
+    const currency = getSafeCurrencyCode(form.currency);
+
     setIsSubmitting(true);
     setError(null);
     setSuccess(null);
@@ -500,6 +509,7 @@ export const DealsPage: React.FC = () => {
         body: JSON.stringify({
           counterpartyId: selectedContact.id,
           amount,
+          currency,
           equity,
           round: form.round,
           status: form.status,
@@ -518,7 +528,7 @@ export const DealsPage: React.FC = () => {
         setDeals((prev) => [createdDeal, ...prev]);
       }
 
-      setSuccess(`Mock investment recorded for ${selectedContact.name}.`);
+      setSuccess(`Mock USD investment recorded for ${selectedContact.name}.`);
       setForm((prev) => ({
         ...prev,
         note: 'Mock investment sent after a warm introduction.'
@@ -527,6 +537,62 @@ export const DealsPage: React.FC = () => {
       setError((err as Error).message);
     } finally {
       setIsSubmitting(false);
+    }
+  };
+
+  const handleUpdateDealStatus = async (dealId: string, nextStatus: DealStatus) => {
+    const tokenValue = localStorage.getItem(TOKEN_KEY);
+    if (!tokenValue) {
+      setError('You need to sign in to update a deal.');
+      return;
+    }
+
+    setUpdatingDealId(dealId);
+    setError(null);
+    setSuccess(null);
+
+    try {
+      const response = await fetch(`${API_URL}/deals/${dealId}/status`, {
+        method: 'PATCH',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${tokenValue}`
+        },
+        body: JSON.stringify({
+          status: nextStatus
+        })
+      });
+
+      const data = (await response.json().catch(() => ({}))) as DealCreateResponse;
+
+      if (!response.ok) {
+        throw new Error(data.error || data.message || 'Failed to update deal status');
+      }
+
+      if (data.deal) {
+        const updatedDeal = normalizeDeal(data.deal);
+        setDeals((prev) => prev.map((deal) => (deal.id === updatedDeal.id ? updatedDeal : deal)));
+      } else {
+        const now = new Date().toISOString();
+        setDeals((prev) =>
+          prev.map((deal) =>
+            deal.id === dealId
+              ? {
+                  ...deal,
+                  status: nextStatus,
+                  lastActivityAt: now,
+                  updatedAt: now
+                }
+              : deal
+          )
+        );
+      }
+
+      setSuccess(`Deal moved to ${nextStatus}.`);
+    } catch (err) {
+      setError((err as Error).message);
+    } finally {
+      setUpdatingDealId('');
     }
   };
 
@@ -543,6 +609,9 @@ export const DealsPage: React.FC = () => {
                 Mock flow
               </Badge>
               <Badge variant="gray" rounded>
+                USD only
+              </Badge>
+              <Badge variant="gray" rounded>
                 Message-backed deals only
               </Badge>
             </div>
@@ -552,8 +621,8 @@ export const DealsPage: React.FC = () => {
                 {currentUserRole === 'investor' ? 'Startup Investment Desk' : 'Investor Deal Desk'}
               </h1>
               <p className="mt-3 max-w-2xl text-sm text-white/80 md:text-base">
-                Create a mock investment only after you have messaged the other side. This stores a deal
-                record, updates the pipeline, and notifies the counterparty.
+                Create a USD mock investment only after you have messaged the other side. This stores a
+                deal record, updates the pipeline, and notifies the counterparty.
               </p>
             </div>
 
@@ -838,7 +907,7 @@ export const DealsPage: React.FC = () => {
               <div>
                 <h2 className="text-lg font-semibold text-gray-900">Mock Investment</h2>
                 <p className="text-sm text-gray-600">
-                  Send money to a startup after you have messaged them.
+                  Send USD mock money after you have messaged the other side.
                 </p>
               </div>
               <Badge variant="warning" rounded>
@@ -897,6 +966,43 @@ export const DealsPage: React.FC = () => {
                     {currentUserRole === 'investor' ? 'Browse Startups' : 'Browse Investors'}
                   </Button>
                 </div>
+
+                {selectedContactDeal && (
+                  <div className="mt-4 rounded-2xl border border-white/60 bg-white/80 p-4">
+                    <div className="flex flex-wrap items-center justify-between gap-3">
+                      <div>
+                        <p className="text-xs uppercase tracking-[0.2em] text-gray-500">
+                          Deal status actions
+                        </p>
+                        <p className="text-sm text-gray-600">
+                          Move the mock deal forward as the conversation progresses.
+                        </p>
+                      </div>
+                      <Badge variant={getStatusVariant(selectedContactDeal.status)} rounded>
+                        {selectedContactDeal.status}
+                      </Badge>
+                    </div>
+
+                    <div className="mt-3 flex flex-wrap gap-2">
+                      {DEAL_STATUSES.map((status) => (
+                        <Button
+                          key={status}
+                          type="button"
+                          variant={status === selectedContactDeal.status ? 'secondary' : 'outline'}
+                          size="sm"
+                          disabled={
+                            status === selectedContactDeal.status ||
+                            isSubmitting ||
+                            updatingDealId === selectedContactDeal.id
+                          }
+                          onClick={() => void handleUpdateDealStatus(selectedContactDeal.id, status)}
+                        >
+                          {status}
+                        </Button>
+                      ))}
+                    </div>
+                  </div>
+                )}
               </div>
             ) : (
               <div className="rounded-2xl border border-dashed border-gray-200 bg-gray-50 p-5">
@@ -929,9 +1035,30 @@ export const DealsPage: React.FC = () => {
                   startAdornment={<DollarSign size={16} />}
                   fullWidth
                   disabled={!selectedContact || isSubmitting}
-                  helperText="Mock transfer amount"
+                  helperText="Mock transfer amount in USD"
                 />
 
+                <div>
+                  <label className="mb-1 block text-sm font-medium text-gray-700">Currency</label>
+                  <select
+                    value={form.currency}
+                    onChange={(event) =>
+                      setForm((prev) => ({ ...prev, currency: event.target.value }))
+                    }
+                    className="block w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm shadow-sm focus:border-primary-500 focus:ring-2 focus:ring-primary-500 focus:ring-opacity-50"
+                    disabled={!selectedContact || isSubmitting}
+                  >
+                    {CURRENCY_OPTIONS.map((currency) => (
+                      <option key={currency} value={currency}>
+                        {currency}
+                      </option>
+                    ))}
+                  </select>
+                  <p className="mt-1 text-sm text-gray-500">USD for startup mock funding.</p>
+                </div>
+              </div>
+
+              <div className="grid gap-4 sm:grid-cols-2">
                 <Input
                   label="Equity"
                   type="number"
@@ -947,9 +1074,7 @@ export const DealsPage: React.FC = () => {
                   disabled={!selectedContact || isSubmitting}
                   helperText="Ownership percentage"
                 />
-              </div>
 
-              <div className="grid gap-4 sm:grid-cols-2">
                 <div>
                   <label className="mb-1 block text-sm font-medium text-gray-700">Round</label>
                   <select
@@ -967,24 +1092,24 @@ export const DealsPage: React.FC = () => {
                     ))}
                   </select>
                 </div>
+              </div>
 
-                <div>
-                  <label className="mb-1 block text-sm font-medium text-gray-700">Pipeline status</label>
-                  <select
-                    value={form.status}
-                    onChange={(event) =>
-                      setForm((prev) => ({ ...prev, status: event.target.value as DealStatus }))
-                    }
-                    className="block w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm shadow-sm focus:border-primary-500 focus:ring-2 focus:ring-primary-500 focus:ring-opacity-50"
-                    disabled={!selectedContact || isSubmitting}
-                  >
-                    {DEAL_STATUSES.map((status) => (
-                      <option key={status} value={status}>
-                        {status}
-                      </option>
-                    ))}
-                  </select>
-                </div>
+              <div>
+                <label className="mb-1 block text-sm font-medium text-gray-700">Pipeline status</label>
+                <select
+                  value={form.status}
+                  onChange={(event) =>
+                    setForm((prev) => ({ ...prev, status: event.target.value as DealStatus }))
+                  }
+                  className="block w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm shadow-sm focus:border-primary-500 focus:ring-2 focus:ring-primary-500 focus:ring-opacity-50"
+                  disabled={!selectedContact || isSubmitting}
+                >
+                  {DEAL_STATUSES.map((status) => (
+                    <option key={status} value={status}>
+                      {status}
+                    </option>
+                  ))}
+                </select>
               </div>
 
               <div>
@@ -1004,9 +1129,9 @@ export const DealsPage: React.FC = () => {
               <div className="rounded-2xl bg-primary-50 p-4">
                 <p className="text-xs uppercase tracking-[0.2em] text-primary-600">Mock summary</p>
                 <p className="mt-2 text-sm text-gray-700">
-                  You are about to send {formatMoney(Number(form.amount || 0), 'USD')} for{' '}
+                  You are about to send {formatMoney(Number(form.amount || 0), form.currency)} for{' '}
                   {formatEquity(Number(form.equity || 0))} equity to{' '}
-                  {selectedContact?.name || `a ${counterpartyLabel.toLowerCase()}`}.
+                  {selectedContact?.name || getCounterpartyPhrase(counterpartyLabel)}.
                 </p>
               </div>
 

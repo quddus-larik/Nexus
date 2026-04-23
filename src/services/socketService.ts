@@ -19,7 +19,7 @@ class SocketService {
       console.log('Socket connected successfully');
     });
 
-    this.socket.on('connect_error', (error: any) => {
+    this.socket.on('connect_error', (error: Error) => {
       console.error('Socket connection error:', error);
     });
 
@@ -33,6 +33,14 @@ class SocketService {
       this.socket.disconnect();
       this.socket = null;
     }
+  }
+
+  emit(event: string, data?: unknown): void {
+    if (!this.socket?.connected) {
+      console.error('Socket not connected');
+      return;
+    }
+    this.socket.emit(event, data);
   }
 
   sendMessage(receiverId: string, content: string): void {
@@ -74,7 +82,48 @@ class SocketService {
     this.socket.emit('typing:stop', { receiverId });
   }
 
-  on(event: string, callback: (data: any) => void): void {
+  startCall(data: {
+    targetUserId: string;
+    roomId: string;
+    callType: 'audio' | 'video';
+    offer: RTCSessionDescriptionInit;
+  }): void {
+    this.emit('call:initiate', data);
+  }
+
+  answerCall(data: {
+    targetUserId: string;
+    roomId: string;
+    answer: RTCSessionDescriptionInit;
+  }): void {
+    this.emit('call:answer', data);
+  }
+
+  declineCall(data: {
+    targetUserId: string;
+    roomId: string;
+    reason?: string;
+  }): void {
+    this.emit('call:decline', data);
+  }
+
+  sendIceCandidate(data: {
+    targetUserId: string;
+    roomId: string;
+    candidate: RTCIceCandidateInit;
+  }): void {
+    this.emit('call:ice-candidate', data);
+  }
+
+  endCall(data: {
+    targetUserId: string;
+    roomId: string;
+    reason?: string;
+  }): void {
+    this.emit('call:end', data);
+  }
+
+  on(event: string, callback: (data: unknown) => void): void {
     if (!this.socket) return;
     this.socket.on(event, callback);
   }

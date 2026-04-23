@@ -3,9 +3,10 @@ import { Outlet, Navigate } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
 import { Navbar } from './Navbar';
 import { Sidebar } from './Sidebar';
+import { IncomingCallCenter } from '../chat/IncomingCallCenter';
 
 export const DashboardLayout: React.FC = () => {
-  const { user, isAuthenticated, isLoading } = useAuth();
+  const { isAuthenticated, isLoading } = useAuth();
   
   if (isLoading) {
     return (
@@ -22,6 +23,7 @@ export const DashboardLayout: React.FC = () => {
   return (
     <div className="min-h-screen bg-gray-50 flex flex-col">
       <Navbar />
+      <IncomingCallCenter />
       
       <div className="flex-1 flex overflow-hidden">
         <Sidebar />
