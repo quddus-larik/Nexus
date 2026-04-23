@@ -83,14 +83,11 @@ export const EntrepreneurDashboard: React.FC = () => {
 
   return (
     <div className="space-y-6 animate-fade-in">
-      <div className="relative overflow-hidden rounded-3xl bg-gradient-to-br from-slate-950 via-slate-900 to-primary-900 p-6 text-white shadow-xl md:p-8">
-        <div className="absolute -right-16 top-0 h-56 w-56 rounded-full bg-white/10 blur-3xl" />
-        <div className="absolute bottom-0 left-1/3 h-40 w-40 rounded-full bg-primary-400/20 blur-3xl" />
-
-        <div className="relative flex flex-col gap-6 lg:flex-row lg:items-end lg:justify-between">
+      <div className="rounded-3xl border border-gray-200 bg-white p-6 shadow-sm md:p-8">
+        <div className="flex flex-col gap-6 lg:flex-row lg:items-end lg:justify-between">
           <div className="max-w-3xl space-y-4">
             <div className="flex flex-wrap items-center gap-2">
-              <Badge variant="warning" rounded>
+              <Badge variant="gray" rounded>
                 Live data
               </Badge>
               <Badge variant="gray" rounded>
@@ -99,10 +96,10 @@ export const EntrepreneurDashboard: React.FC = () => {
             </div>
 
             <div>
-              <h1 className="text-3xl font-bold tracking-tight md:text-4xl">
+              <h1 className="text-3xl font-bold tracking-tight text-gray-900 md:text-4xl">
                 Welcome, {user.name}
               </h1>
-              <p className="mt-3 max-w-2xl text-sm text-white/80 md:text-base">
+              <p className="mt-3 max-w-2xl text-sm text-gray-600 md:text-base">
                 MongoDB-backed view of warm investors, active deals, and unread activity pulled from your
                 messages, deals, and notifications.
               </p>
@@ -110,7 +107,7 @@ export const EntrepreneurDashboard: React.FC = () => {
 
             <div className="flex flex-wrap gap-3">
               <Button
-                variant="secondary"
+                variant="primary"
                 size="sm"
                 onClick={() => navigate('/investors')}
                 rightIcon={<ArrowRight size={16} />}
@@ -120,7 +117,7 @@ export const EntrepreneurDashboard: React.FC = () => {
               <Button
                 variant="outline"
                 size="sm"
-                className="border-white/20 text-white hover:bg-white/10"
+                className="border-gray-300 text-gray-700 hover:bg-gray-50"
                 onClick={() => navigate('/deals')}
                 leftIcon={<DollarSign size={16} />}
               >
@@ -130,29 +127,29 @@ export const EntrepreneurDashboard: React.FC = () => {
           </div>
 
           <div className="grid grid-cols-2 gap-3 md:min-w-[420px]">
-            <Card className="border-white/10 bg-white/10 text-white shadow-none">
+            <Card className="border border-gray-200 bg-white text-gray-900 shadow-sm">
               <CardBody className="p-4">
                 <div className="flex items-center gap-3">
-                  <div className="rounded-2xl bg-white/10 p-3">
-                    <Users size={18} />
+                  <div className="rounded-2xl bg-gray-50 p-3">
+                    <Users size={18} className="text-gray-700" />
                   </div>
                   <div>
-                    <p className="text-xs uppercase tracking-[0.2em] text-white/60">Warm investors</p>
-                    <p className="text-lg font-semibold">{loading ? '...' : stats.warmContactsCount}</p>
+                    <p className="text-xs uppercase tracking-[0.2em] text-gray-500">Warm investors</p>
+                    <p className="text-lg font-semibold text-gray-900">{loading ? '...' : stats.warmContactsCount}</p>
                   </div>
                 </div>
               </CardBody>
             </Card>
 
-            <Card className="border-white/10 bg-white/10 text-white shadow-none">
+            <Card className="border border-gray-200 bg-white text-gray-900 shadow-sm">
               <CardBody className="p-4">
                 <div className="flex items-center gap-3">
-                  <div className="rounded-2xl bg-white/10 p-3">
-                    <TrendingUp size={18} />
+                  <div className="rounded-2xl bg-gray-50 p-3">
+                    <TrendingUp size={18} className="text-gray-700" />
                   </div>
                   <div>
-                    <p className="text-xs uppercase tracking-[0.2em] text-white/60">Active deals</p>
-                    <p className="text-lg font-semibold">{loading ? '...' : stats.activeDealsCount}</p>
+                    <p className="text-xs uppercase tracking-[0.2em] text-gray-500">Active deals</p>
+                    <p className="text-lg font-semibold text-gray-900">{loading ? '...' : stats.activeDealsCount}</p>
                   </div>
                 </div>
               </CardBody>
@@ -176,15 +173,15 @@ export const EntrepreneurDashboard: React.FC = () => {
       )}
 
       <div className="grid gap-4 md:grid-cols-3">
-        <Card className="bg-success-50 border border-success-100">
+        <Card className="border border-gray-200 bg-white shadow-sm">
           <CardBody>
             <div className="flex items-center">
-              <div className="p-3 bg-success-100 rounded-full mr-4">
-                <DollarSign size={20} className="text-success-700" />
+              <div className="p-3 bg-gray-50 rounded-full mr-4">
+                <DollarSign size={20} className="text-gray-700" />
               </div>
               <div>
-                <p className="text-sm font-medium text-success-700">Closed deals</p>
-                <h3 className="text-xl font-semibold text-success-900">
+                <p className="text-sm font-medium text-gray-600">Closed deals</p>
+                <h3 className="text-xl font-semibold text-gray-900">
                   {loading ? '...' : stats.closedDealsCount}
                 </h3>
               </div>
@@ -192,15 +189,15 @@ export const EntrepreneurDashboard: React.FC = () => {
           </CardBody>
         </Card>
 
-        <Card className="bg-blue-50 border border-blue-100">
+        <Card className="border border-gray-200 bg-white shadow-sm">
           <CardBody>
             <div className="flex items-center">
-              <div className="p-3 bg-blue-100 rounded-full mr-4">
-                <MessageSquare size={20} className="text-blue-700" />
+              <div className="p-3 bg-gray-50 rounded-full mr-4">
+                <MessageSquare size={20} className="text-gray-700" />
               </div>
               <div>
-                <p className="text-sm font-medium text-blue-700">Unread messages</p>
-                <h3 className="text-xl font-semibold text-blue-900">
+                <p className="text-sm font-medium text-gray-600">Unread messages</p>
+                <h3 className="text-xl font-semibold text-gray-900">
                   {loading ? '...' : stats.unreadMessagesCount}
                 </h3>
               </div>
@@ -208,15 +205,15 @@ export const EntrepreneurDashboard: React.FC = () => {
           </CardBody>
         </Card>
 
-        <Card className="bg-warning-50 border border-warning-100">
+        <Card className="border border-gray-200 bg-white shadow-sm">
           <CardBody>
             <div className="flex items-center">
-              <div className="p-3 bg-warning-100 rounded-full mr-4">
-                <Bell size={20} className="text-warning-700" />
+              <div className="p-3 bg-gray-50 rounded-full mr-4">
+                <Bell size={20} className="text-gray-700" />
               </div>
               <div>
-                <p className="text-sm font-medium text-warning-700">Unread notifications</p>
-                <h3 className="text-xl font-semibold text-warning-900">
+                <p className="text-sm font-medium text-gray-600">Unread notifications</p>
+                <h3 className="text-xl font-semibold text-gray-900">
                   {loading ? '...' : stats.unreadNotificationsCount}
                 </h3>
               </div>

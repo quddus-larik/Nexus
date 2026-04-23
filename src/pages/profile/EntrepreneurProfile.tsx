@@ -1,17 +1,18 @@
-import React, { useEffect, useMemo, useState } from 'react';
-import { useParams, Link } from 'react-router-dom';
-import { MessageCircle, Users, Calendar, Building2, MapPin, UserCircle, FileText, DollarSign, Send } from 'lucide-react';
+import React, { useEffect, useState } from 'react';
+import { useNavigate, useParams, Link } from 'react-router-dom';
+import { MessageCircle, Users, Calendar, Building2, MapPin, UserCircle, FileText, DollarSign } from 'lucide-react';
 import { Avatar } from '../../components/ui/Avatar';
 import { Button } from '../../components/ui/Button';
 import { Card, CardBody, CardHeader } from '../../components/ui/Card';
 import { Badge } from '../../components/ui/Badge';
 import { Input } from '../../components/ui/Input';
 import { useAuth } from '../../context/AuthContext';
-import { createCollaborationRequest, getRequestsFromInvestor } from '../../data/collaborationRequests';
 import { Entrepreneur } from '../../types';
+import { DASHBOARD_TOKEN_KEY, fetchDashboardSummary } from '../dashboard/dashboardApi';
 
 export const EntrepreneurProfile: React.FC = () => {
   const { id } = useParams<{ id: string }>();
+  const navigate = useNavigate();
   const { user: currentUser, updateProfile } = useAuth();
 
   const [entrepreneur, setEntrepreneur] = useState<Entrepreneur | null>(null);
@@ -20,6 +21,15 @@ export const EntrepreneurProfile: React.FC = () => {
   const [isEditing, setIsEditing] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
+  const [relationshipState, setRelationshipState] = useState<{
+    isWarmContact: boolean;
+    activeDealId: string;
+    activeDealStatus: string;
+  }>({
+    isWarmContact: false,
+    activeDealId: '',
+    activeDealStatus: ''
+  });
   const [formState, setFormState] = useState({
     name: '',
     startupName: '',
@@ -31,10 +41,6 @@ export const EntrepreneurProfile: React.FC = () => {
   });
 
   const apiBaseUrl = import.meta.env.VITE_API_URL as string | undefined;
-  const authHeader = useMemo(() => {
-    const token = localStorage.getItem('business_nexus_access_token');
-    return token ? { Authorization: `Bearer ${token}` } : {};
-  }, []);
 
   useEffect(() => {
     if (!id) {
@@ -70,6 +76,58 @@ export const EntrepreneurProfile: React.FC = () => {
   }, [apiBaseUrl, id]);
 
   useEffect(() => {
+    if (!id || !currentUser || currentUser.role !== 'investor' || currentUser.id === id) {
+      setRelationshipState({
+        isWarmContact: false,
+        activeDealId: '',
+        activeDealStatus: ''
+      });
+      return;
+    }
+
+    const token = localStorage.getItem(DASHBOARD_TOKEN_KEY);
+    if (!token) {
+      setRelationshipState({
+        isWarmContact: false,
+        activeDealId: '',
+        activeDealStatus: ''
+      });
+      return;
+    }
+
+    let isActive = true;
+
+    void fetchDashboardSummary(token)
+      .then((data) => {
+        if (!isActive) return;
+
+        const warmContact = (data.warmContacts || []).some((contact) => contact.id === id);
+        const activeDeal = (data.recentDeals || []).find(
+          (deal) => deal.startup?.id === id || deal.investor?.id === id
+        );
+
+        setRelationshipState({
+          isWarmContact: warmContact,
+          activeDealId: activeDeal?.id || '',
+          activeDealStatus: activeDeal?.status || ''
+        });
+      })
+      .catch(() => {
+        if (!isActive) return;
+
+        setRelationshipState({
+          isWarmContact: false,
+          activeDealId: '',
+          activeDealStatus: ''
+        });
+      });
+
+    return () => {
+      isActive = false;
+    };
+  }, [currentUser, id]);
+
+  useEffect(() => {
     if (!entrepreneur) {
       return;
     }
@@ -93,6 +151,8 @@ export const EntrepreneurProfile: React.FC = () => {
     setIsSaving(true);
     setFormError(null);
 
+    const token = localStorage.getItem(DASHBOARD_TOKEN_KEY);
+
     const payload = {
       username: formState.name.trim(),
       position: formState.startupName.trim(),
@@ -104,6 +164,10 @@ export const EntrepreneurProfile: React.FC = () => {
     };
 
     try {
+      if (!token) {
+        throw new Error('Missing authentication token');
+      }
+
       const updatedUser = await updateProfile(id, payload);
       setEntrepreneur(updatedUser as Entrepreneur);
       setIsEditing(false);
@@ -164,28 +228,12 @@ export const EntrepreneurProfile: React.FC = () => {
   
   const isCurrentUser = currentUser?.id === entrepreneur.id;
   const isInvestor = currentUser?.role === 'investor';
-  
-  // Compute effective team size from database or team members length
   const effectiveTeamSize = entrepreneur.teamSize;
-  
-  // Check if the current investor has already sent a request to this entrepreneur
-  const hasRequestedCollaboration = isInvestor && id 
-    ? getRequestsFromInvestor(currentUser.id).some(req => req.entrepreneurId === id)
-    : false;
-  
-  const handleSendRequest = () => {
-    if (isInvestor && currentUser && id) {
-      createCollaborationRequest(
-        currentUser.id,
-        id,
-        `I'm interested in learning more about ${entrepreneur.startupName || 'your startup'} and would like to explore potential investment opportunities.`
-      );
-      
-      // In a real app, we would refresh the data or update state
-      // For this demo, we'll force a page reload
-      window.location.reload();
-    }
-  };
+  const dealButtonLabel = relationshipState.activeDealId
+    ? 'Open Deal Desk'
+    : relationshipState.isWarmContact
+      ? 'Create Deal'
+      : 'Message First';
   
   return (
     <div className="space-y-6 animate-fade-in">
@@ -221,6 +269,17 @@ export const EntrepreneurProfile: React.FC = () => {
                   <Users size={14} className="mr-1" />
                   {effectiveTeamSize} team members
                 </Badge>
+                {isInvestor && !isCurrentUser && (
+                  <Badge
+                    variant={relationshipState.activeDealId ? 'success' : relationshipState.isWarmContact ? 'primary' : 'gray'}
+                  >
+                    {relationshipState.activeDealId
+                      ? `Deal ${relationshipState.activeDealStatus || 'linked'}`
+                      : relationshipState.isWarmContact
+                        ? 'Warm contact'
+                        : 'Message first'}
+                  </Badge>
+                )}
               </div>
             </div>
           </div>
@@ -239,11 +298,11 @@ export const EntrepreneurProfile: React.FC = () => {
                 
                 {isInvestor && (
                   <Button
-                    leftIcon={<Send size={18} />}
-                    disabled={hasRequestedCollaboration}
-                    onClick={handleSendRequest}
+                    leftIcon={<DollarSign size={18} />}
+                    variant={relationshipState.activeDealId ? 'secondary' : 'primary'}
+                    onClick={() => navigate('/deals')}
                   >
-                    {hasRequestedCollaboration ? 'Request Sent' : 'Request Collaboration'}
+                    {dealButtonLabel}
                   </Button>
                 )}
               </>
@@ -577,24 +636,31 @@ export const EntrepreneurProfile: React.FC = () => {
               {!isCurrentUser && isInvestor && (
                 <div className="mt-4 pt-4 border-t border-gray-100">
                   <p className="text-sm text-gray-500">
-                    Request access to detailed documents and financials by sending a collaboration request.
+                    {relationshipState.activeDealId
+                      ? 'This startup already has a mock investment linked. Open the deal desk to update the round, amount, or status.'
+                      : relationshipState.isWarmContact
+                        ? 'You have already messaged this startup. Create a mock investment from the deal desk.'
+                        : 'Message this founder first to unlock mock investment actions.'}
                   </p>
-                  
-                  {!hasRequestedCollaboration ? (
-                    <Button
-                      className="mt-3 w-full"
-                      onClick={handleSendRequest}
-                    >
-                      Request Collaboration
-                    </Button>
-                  ) : (
-                    <Button
-                      className="mt-3 w-full"
-                      disabled
-                    >
-                      Request Sent
-                    </Button>
-                  )}
+
+                  <Button
+                    className="mt-3 w-full"
+                    variant={relationshipState.activeDealId ? 'secondary' : 'primary'}
+                    onClick={() => {
+                      if (relationshipState.activeDealId || relationshipState.isWarmContact) {
+                        navigate('/deals');
+                        return;
+                      }
+
+                      navigate(`/chat/${entrepreneur.id}`);
+                    }}
+                  >
+                    {relationshipState.activeDealId
+                      ? 'Open Deal Desk'
+                      : relationshipState.isWarmContact
+                        ? 'Create Mock Deal'
+                        : 'Message Startup'}
+                  </Button>
                 </div>
               )}
             </CardBody>
