@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { Users, PieChart, Filter, Search, PlusCircle } from 'lucide-react';
 import { Button } from '../../components/ui/Button';
@@ -8,38 +8,111 @@ import { Badge } from '../../components/ui/Badge';
 import { EntrepreneurCard } from '../../components/entrepreneur/EntrepreneurCard';
 import { useAuth } from '../../context/AuthContext';
 import { Entrepreneur } from '../../types';
-import { entrepreneurs } from '../../data/users';
-import { getRequestsFromInvestor } from '../../data/collaborationRequests';
+
+type DealApiResponse = {
+  deals?: Array<{
+    startup?: { id?: string };
+    investor?: { id?: string };
+    status?: string;
+  }>;
+};
 
 export const InvestorDashboard: React.FC = () => {
   const { user } = useAuth();
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedIndustries, setSelectedIndustries] = useState<string[]>([]);
-  
-  if (!user) return null;
-  
-  // Get collaboration requests sent by this investor
-  const sentRequests = getRequestsFromInvestor(user.id);
-  const requestedEntrepreneurIds = sentRequests.map(req => req.entrepreneurId);
+  const [entrepreneurs, setEntrepreneurs] = useState<Entrepreneur[]>([]);
+  const [connectionCount, setConnectionCount] = useState(0);
+  const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState('');
+
+  const currentUserId = (user as any)?.id?.toString?.() || (user as any)?._id?.toString?.() || '';
+  const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:8080';
+
+  useEffect(() => {
+    if (!user) {
+      setEntrepreneurs([]);
+      setConnectionCount(0);
+      setIsLoading(false);
+      return;
+    }
+
+    const fetchDashboardData = async () => {
+      try {
+        setIsLoading(true);
+        setError('');
+        const token = localStorage.getItem('business_nexus_access_token');
+
+        const entrepreneurPromise = fetch(`${apiUrl}/entrepreneur/list/all`);
+        const dealsPromise = token
+          ? fetch(`${apiUrl}/deals`, {
+              headers: {
+                Authorization: `Bearer ${token}`
+              }
+            })
+          : Promise.resolve(null);
+
+        const [entrepreneurRes, dealsRes] = await Promise.all([entrepreneurPromise, dealsPromise]);
+
+        if (entrepreneurRes.ok) {
+          const entrepreneurData = await entrepreneurRes.json();
+          const list = Array.isArray(entrepreneurData) ? entrepreneurData : [];
+          setEntrepreneurs(list);
+        } else {
+          setEntrepreneurs([]);
+        }
+
+        if (dealsRes && dealsRes.ok) {
+          const dealsData: DealApiResponse = await dealsRes.json();
+          const deals = Array.isArray(dealsData?.deals) ? dealsData.deals : [];
+          const connectedStartupIds = new Set(
+            deals
+              .map(deal => deal.startup?.id?.toString?.())
+              .filter((id): id is string => Boolean(id))
+          );
+          setConnectionCount(connectedStartupIds.size);
+        } else {
+          setConnectionCount(0);
+        }
+      } catch (err) {
+        console.error('Error loading investor dashboard:', err);
+        setError('Failed to load dashboard data');
+        setEntrepreneurs([]);
+        setConnectionCount(0);
+      } finally {
+        setIsLoading(false);
+      }
+    };
+
+    void fetchDashboardData();
+  }, [apiUrl, currentUserId, user]);
   
   // Filter entrepreneurs based on search and industry filters
-  const filteredEntrepreneurs = entrepreneurs.filter(entrepreneur => {
-    // Search filter
-    const matchesSearch = searchQuery === '' || 
-      entrepreneur.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      entrepreneur.startupName.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      entrepreneur.industry.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      entrepreneur.pitchSummary.toLowerCase().includes(searchQuery.toLowerCase());
-    
-    // Industry filter
-    const matchesIndustry = selectedIndustries.length === 0 || 
-      selectedIndustries.includes(entrepreneur.industry);
-    
-    return matchesSearch && matchesIndustry;
-  });
+  const filteredEntrepreneurs = useMemo(
+    () =>
+      entrepreneurs.filter(entrepreneur => {
+        const name = entrepreneur.name || '';
+        const startupName = entrepreneur.startupName || '';
+        const industry = entrepreneur.industry || '';
+        const pitchSummary = entrepreneur.pitchSummary || '';
+
+        const matchesSearch =
+          searchQuery === '' ||
+          name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+          startupName.toLowerCase().includes(searchQuery.toLowerCase()) ||
+          industry.toLowerCase().includes(searchQuery.toLowerCase()) ||
+          pitchSummary.toLowerCase().includes(searchQuery.toLowerCase());
+
+        const matchesIndustry =
+          selectedIndustries.length === 0 || selectedIndustries.includes(industry);
+
+        return matchesSearch && matchesIndustry;
+      }),
+    [entrepreneurs, searchQuery, selectedIndustries]
+  );
   
   // Get unique industries for filter
-  const industries = Array.from(new Set(entrepreneurs.map(e => e.industry)));
+  const industries = Array.from(new Set(entrepreneurs.map(e => e.industry).filter(Boolean)));
   
   // Toggle industry selection
   const toggleIndustry = (industry: string) => {
@@ -49,6 +122,8 @@ export const InvestorDashboard: React.FC = () => {
         : [...prevSelected, industry]
     );
   };
+
+  if (!user) return null;
   
   return (
     <div className="space-y-6 animate-fade-in">
@@ -139,7 +214,7 @@ export const InvestorDashboard: React.FC = () => {
               <div>
                 <p className="text-sm font-medium text-accent-700">Your Connections</p>
                 <h3 className="text-xl font-semibold text-accent-900">
-                  {sentRequests.filter(req => req.status === 'accepted').length}
+                  {connectionCount}
                 </h3>
               </div>
             </div>
@@ -155,7 +230,17 @@ export const InvestorDashboard: React.FC = () => {
           </CardHeader>
           
           <CardBody>
-            {filteredEntrepreneurs.length > 0 ? (
+            {isLoading && (
+              <div className="text-center py-8 text-gray-600">Loading startups...</div>
+            )}
+
+            {!isLoading && error && (
+              <div className="text-center py-8">
+                <p className="text-red-600">{error}</p>
+              </div>
+            )}
+
+            {!isLoading && !error && filteredEntrepreneurs.length > 0 ? (
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
                 {filteredEntrepreneurs.map(entrepreneur => (
                   <EntrepreneurCard
@@ -164,7 +249,7 @@ export const InvestorDashboard: React.FC = () => {
                   />
                 ))}
               </div>
-            ) : (
+            ) : !isLoading && !error ? (
               <div className="text-center py-8">
                 <p className="text-gray-600">No startups match your filters</p>
                 <Button 
@@ -178,7 +263,7 @@ export const InvestorDashboard: React.FC = () => {
                   Clear filters
                 </Button>
               </div>
-            )}
+            ) : null}
           </CardBody>
         </Card>
       </div>
