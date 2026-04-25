@@ -389,8 +389,8 @@ export const IncomingCallCenter: React.FC = () => {
   return (
     <>
       {incomingCall && !activeCall && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-white/75 backdrop-blur-md p-4">
-          <div className="w-full max-w-md rounded-3xl border border-gray-200 bg-white p-6 shadow-2xl">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/80 backdrop-blur-md p-4">
+          <div className="w-full max-w-md rounded-3xl border border-white/10 bg-white p-6 shadow-2xl">
             <div className="flex items-start gap-4">
               <div className="relative">
                 <Avatar
@@ -398,12 +398,12 @@ export const IncomingCallCenter: React.FC = () => {
                   alt={incomingCall.callerName}
                   size="xl"
                 />
-                <span className="absolute -bottom-1 -right-1 flex h-7 w-7 items-center justify-center rounded-full bg-gray-100 text-gray-700 shadow-lg">
+                <span className="absolute -bottom-1 -right-1 flex h-7 w-7 items-center justify-center rounded-full bg-primary-600 text-white shadow-lg">
                   <PhoneIncoming size={14} />
                 </span>
               </div>
               <div className="flex-1">
-                <p className="text-xs font-semibold uppercase tracking-[0.2em] text-gray-600">
+                <p className="text-xs font-semibold uppercase tracking-[0.2em] text-primary-600">
                   Incoming {incomingCall.callType} call
                 </p>
                 <h3 className="mt-1 text-2xl font-semibold text-gray-900">{incomingCall.callerName}</h3>
@@ -443,9 +443,9 @@ export const IncomingCallCenter: React.FC = () => {
       )}
 
       {activeCall && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-white/80 backdrop-blur-md p-4">
-          <div className="w-full max-w-6xl overflow-hidden rounded-[2rem] border border-gray-200 bg-white shadow-2xl">
-            <div className="flex flex-col gap-4 border-b border-gray-200 p-4 text-gray-900 sm:flex-row sm:items-center sm:justify-between sm:p-6">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/90 backdrop-blur-md p-4">
+          <div className="w-full max-w-6xl overflow-hidden rounded-[2rem] border border-white/10 bg-slate-900 shadow-2xl">
+            <div className="flex flex-col gap-4 border-b border-white/10 p-4 text-white sm:flex-row sm:items-center sm:justify-between sm:p-6">
               <div className="flex items-center gap-4">
                 <Avatar
                   src={activeCall.peerAvatar}
@@ -454,14 +454,14 @@ export const IncomingCallCenter: React.FC = () => {
                   status={activeCall.status === 'connected' ? 'online' : 'busy'}
                 />
                 <div>
-                  <p className="text-xs font-semibold uppercase tracking-[0.25em] text-gray-500">
+                  <p className="text-xs font-semibold uppercase tracking-[0.25em] text-white/50">
                     <span className="inline-flex items-center gap-2">
                       {activeCall.direction === 'incoming' ? <PhoneIncoming size={12} /> : <PhoneOutgoing size={12} />}
                       {activeCall.direction === 'incoming' ? 'Incoming' : 'Outgoing'} {activeCall.callType} call
                     </span>
                   </p>
                   <h3 className="mt-1 text-xl font-semibold">{activeCall.peerName}</h3>
-                  <p className="mt-1 text-sm text-gray-500">
+                  <p className="mt-1 text-sm text-white/60">
                     {activeCall.status === 'connected'
                       ? 'Connected'
                       : activeCall.direction === 'incoming'
@@ -475,7 +475,7 @@ export const IncomingCallCenter: React.FC = () => {
                 <Button
                   variant="outline"
                   size="sm"
-                  className="rounded-full border-gray-200 bg-gray-50 text-gray-700 hover:bg-gray-100 hover:text-gray-900"
+                  className="rounded-full border-white/15 bg-white/5 text-white hover:bg-white/10 hover:text-white"
                   onClick={handleToggleMute}
                   disabled={!localStream}
                   aria-label={isMuted ? 'Unmute microphone' : 'Mute microphone'}
@@ -486,7 +486,7 @@ export const IncomingCallCenter: React.FC = () => {
                   <Button
                     variant="outline"
                     size="sm"
-                    className="rounded-full border-gray-200 bg-gray-50 text-gray-700 hover:bg-gray-100 hover:text-gray-900"
+                    className="rounded-full border-white/15 bg-white/5 text-white hover:bg-white/10 hover:text-white"
                     onClick={handleToggleCamera}
                     disabled={!localStream}
                     aria-label={isCameraEnabled ? 'Disable camera' : 'Enable camera'}
@@ -506,7 +506,7 @@ export const IncomingCallCenter: React.FC = () => {
               </div>
             </div>
 
-            <div className="relative min-h-[65vh] bg-white">
+            <div className="relative min-h-[65vh] bg-black">
               {activeCall.callType === 'video' ? (
                 remoteStream ? (
                   <video
@@ -516,16 +516,16 @@ export const IncomingCallCenter: React.FC = () => {
                     className="h-[65vh] w-full object-cover"
                   />
                 ) : (
-                  <div className="flex h-[65vh] flex-col items-center justify-center bg-gray-50 text-gray-900">
-                    <div className="mb-4 flex h-24 w-24 items-center justify-center rounded-full border border-gray-200 bg-white shadow-sm">
-                      <Loader2 size={28} className="animate-spin text-gray-500" />
+                  <div className="flex h-[65vh] flex-col items-center justify-center bg-gradient-to-br from-slate-950 via-slate-900 to-slate-800 text-white">
+                    <div className="mb-4 flex h-24 w-24 items-center justify-center rounded-full bg-white/10">
+                      <Loader2 size={28} className="animate-spin text-white/70" />
                     </div>
                     <p className="text-lg font-medium">{activeCall.peerName}</p>
-                    <p className="mt-1 text-sm text-gray-500">Waiting for the camera stream...</p>
+                    <p className="mt-1 text-sm text-white/50">Waiting for the camera stream...</p>
                   </div>
                 )
               ) : (
-                <div className="flex h-[65vh] items-center justify-center bg-gray-50 p-8 text-gray-900">
+                <div className="flex h-[65vh] items-center justify-center bg-gradient-to-br from-slate-950 via-slate-900 to-slate-800 p-8 text-white">
                   <div className="max-w-md text-center">
                     <Avatar
                       src={activeCall.peerAvatar}
@@ -534,7 +534,7 @@ export const IncomingCallCenter: React.FC = () => {
                       className="mx-auto"
                     />
                     <h4 className="mt-6 text-3xl font-semibold">{activeCall.peerName}</h4>
-                    <p className="mt-2 text-sm text-gray-500">
+                    <p className="mt-2 text-sm text-white/60">
                       {activeCall.status === 'connected'
                         ? 'Voice call in progress'
                         : 'Connecting voice call...'}
@@ -556,7 +556,7 @@ export const IncomingCallCenter: React.FC = () => {
                   autoPlay
                   muted
                   playsInline
-                  className="absolute bottom-4 right-4 h-40 w-28 rounded-2xl border border-gray-200 object-cover shadow-2xl sm:h-48 sm:w-36"
+                  className="absolute bottom-4 right-4 h-40 w-28 rounded-2xl border border-white/15 object-cover shadow-2xl sm:h-48 sm:w-36"
                 />
               )}
 

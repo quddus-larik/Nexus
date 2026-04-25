@@ -62,13 +62,11 @@ export interface DashboardSummaryResponse {
   message?: string;
 }
 
-const fetchJson = async <T,>(path: string, token?: string): Promise<T> => {
+const fetchJson = async <T,>(path: string, token: string): Promise<T> => {
   const response = await fetch(`${API_URL}${path}`, {
-    headers: token
-      ? {
-          Authorization: `Bearer ${token}`
-        }
-      : undefined
+    headers: {
+      Authorization: `Bearer ${token}`
+    }
   });
 
   const data = (await response.json().catch(() => ({}))) as {
@@ -85,6 +83,3 @@ const fetchJson = async <T,>(path: string, token?: string): Promise<T> => {
 
 export const fetchDashboardSummary = async (token: string): Promise<DashboardSummaryResponse> =>
   fetchJson<DashboardSummaryResponse>('/dashboard', token);
-
-export const fetchEntrepreneurDirectory = async (): Promise<Entrepreneur[]> =>
-  fetchJson<Entrepreneur[]>('/entrepreneur/list/all');

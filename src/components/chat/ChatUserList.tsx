@@ -149,7 +149,7 @@ export const ChatUserList: React.FC<ChatUserListProps> = ({ conversations }) => 
                   key={otherUserId}
                   className={`px-4 py-3 flex cursor-pointer transition-colors duration-200 ${
                     isActive
-                      ? 'bg-gray-50 border-l-4 border-gray-300'
+                      ? 'bg-primary-50 border-l-4 border-primary-600'
                       : 'hover:bg-gray-50 border-l-4 border-transparent'
                   }`}
                   onClick={() => handleSelectUser(otherUserId)}
@@ -184,7 +184,7 @@ export const ChatUserList: React.FC<ChatUserListProps> = ({ conversations }) => 
                       )}
                       
                       {conversation.isRead === false && conversation.senderId?.toString() !== currentUserId && (
-                        <Badge variant="gray" size="sm" rounded>New</Badge>
+                        <Badge variant="primary" size="sm" rounded>New</Badge>
                       )}
                     </div>
                   </div>
