@@ -7,9 +7,10 @@ import { useAuth } from '../../context/AuthContext';
 interface ChatMessageProps {
   message: Message;
   isCurrentUser: boolean;
+  status?: 'sending' | 'sent' | 'read' | 'failed';
 }
 
-export const ChatMessage: React.FC<ChatMessageProps> = ({ message, isCurrentUser }) => {
+export const ChatMessage: React.FC<ChatMessageProps> = ({ message, isCurrentUser, status }) => {
   const { user: currentUser } = useAuth();
   const displayName = isCurrentUser
     ? currentUser?.name || 'You'
@@ -17,6 +18,17 @@ export const ChatMessage: React.FC<ChatMessageProps> = ({ message, isCurrentUser
   const avatarUrl = isCurrentUser
     ? currentUser?.avatarUrl || ''
     : message.senderAvatar || '';
+  const messageTime = message.timestamp ? new Date(message.timestamp) : null;
+  const hasValidMessageTime = messageTime !== null && !Number.isNaN(messageTime.getTime());
+
+  const deliveryStatusLabel = (() => {
+    if (!isCurrentUser || !status) return null;
+    if (status === 'sending') return 'Sending...';
+    if (status === 'sent') return 'Sent';
+    if (status === 'read') return 'Seen';
+    if (status === 'failed') return 'Failed to send';
+    return null;
+  })();
 
   return (
     <div
@@ -42,9 +54,26 @@ export const ChatMessage: React.FC<ChatMessageProps> = ({ message, isCurrentUser
           <p className="text-sm">{message.content}</p>
         </div>
         
-        <span className="text-xs text-gray-500 mt-1">
-          {formatDistanceToNow(new Date(message.timestamp), { addSuffix: true })}
-        </span>
+        <div className="mt-1 flex items-center space-x-2">
+          {hasValidMessageTime && (
+            <span className="text-xs text-gray-500">
+              {formatDistanceToNow(messageTime, { addSuffix: true })}
+            </span>
+          )}
+          {deliveryStatusLabel && (
+            <span
+              className={`text-xs ${
+                status === 'failed'
+                  ? 'text-red-500'
+                  : status === 'read'
+                    ? 'text-green-600'
+                    : 'text-gray-400'
+              }`}
+            >
+              {deliveryStatusLabel}
+            </span>
+          )}
+        </div>
       </div>
       
       {isCurrentUser && (

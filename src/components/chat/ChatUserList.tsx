@@ -33,10 +33,12 @@ export const ChatUserList: React.FC<ChatUserListProps> = ({ conversations }) => 
   const navigate = useNavigate();
   const { userId: activeUserId } = useParams<{ userId: string }>();
   const { user: currentUser } = useAuth();
-  const currentUserId = currentUser?.id;
+  const currentUserId = (currentUser as any)?.id?.toString?.() || (currentUser as any)?._id?.toString?.() || '';
   const [onlineUsers, setOnlineUsers] = useState<string[]>([]);
+  const [typingUsers, setTypingUsers] = useState<Set<string>>(new Set());
   const [userProfiles, setUserProfiles] = useState<Record<string, { id: string; name: string; avatarUrl: string }>>({});
   const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:8080';
+  const toId = (value: ConversationId) => value?.toString?.() || '';
 
   useEffect(() => {
     socketService.on('users:online', (users: OnlineUser[]) => {
@@ -44,8 +46,24 @@ export const ChatUserList: React.FC<ChatUserListProps> = ({ conversations }) => 
       setOnlineUsers(userIds);
     });
 
+    socketService.on('typing:indicator', (data: any) => {
+      const typingUserId = data?.userId?.toString();
+      if (!typingUserId) return;
+
+      if (data.isTyping) {
+        setTypingUsers(prev => new Set([...prev, typingUserId]));
+      } else {
+        setTypingUsers(prev => {
+          const updated = new Set(prev);
+          updated.delete(typingUserId);
+          return updated;
+        });
+      }
+    });
+
     return () => {
       socketService.off('users:online');
+      socketService.off('typing:indicator');
     };
   }, []);
 
@@ -78,7 +96,7 @@ export const ChatUserList: React.FC<ChatUserListProps> = ({ conversations }) => 
     const uniqueOtherUserIds = Array.from(
       new Set(
         conversations
-          .map(conv => (conv.senderId?.toString() === currentUserId ? conv.receiverId?.toString() : conv.senderId?.toString()))
+          .map(conv => (toId(conv.senderId) === currentUserId ? toId(conv.receiverId) : toId(conv.senderId)))
           .filter(Boolean)
       )
     ) as string[];
@@ -97,11 +115,11 @@ export const ChatUserList: React.FC<ChatUserListProps> = ({ conversations }) => 
   };
 
   const getUniqueConversations = () => {
-    const uniqueMap = new Map();
+    const uniqueMap = new Map<string, ChatConversationItem>();
     conversations.forEach(conv => {
-      const otherUserId = conv.senderId?.toString() === currentUserId 
-        ? conv.receiverId?.toString() 
-        : conv.senderId?.toString();
+      const senderId = toId(conv.senderId);
+      const receiverId = toId(conv.receiverId);
+      const otherUserId = senderId === currentUserId ? receiverId : senderId;
       
       if (otherUserId && !uniqueMap.has(otherUserId)) {
         uniqueMap.set(otherUserId, conv);
@@ -118,13 +136,14 @@ export const ChatUserList: React.FC<ChatUserListProps> = ({ conversations }) => 
         <div className="space-y-1">
           {getUniqueConversations().length > 0 ? (
             getUniqueConversations().map((conversation) => {
-              const otherUserId = conversation.senderId?.toString() === currentUserId 
-                ? conversation.receiverId?.toString() 
-                : conversation.senderId?.toString();
+              const senderId = toId(conversation.senderId);
+              const receiverId = toId(conversation.receiverId);
+              const otherUserId = senderId === currentUserId ? receiverId : senderId;
               
               if (!otherUserId) return null;
+              if (otherUserId === currentUserId) return null;
 
-              const profileFromConversation = conversation.senderId?.toString() === currentUserId
+              const profileFromConversation = senderId === currentUserId
                 ? {
                     name: conversation.receiverName,
                     avatarUrl: conversation.receiverAvatar
@@ -142,6 +161,7 @@ export const ChatUserList: React.FC<ChatUserListProps> = ({ conversations }) => 
 
               const isActive = activeUserId === otherUserId;
               const isOnline = onlineUsers.includes(otherUserId);
+              const isTyping = typingUsers.has(otherUserId);
               const messageTime = conversation.createdAt || conversation.timestamp;
 
               return (
@@ -176,14 +196,18 @@ export const ChatUserList: React.FC<ChatUserListProps> = ({ conversations }) => 
                     </div>
                     
                     <div className="flex justify-between items-center mt-1">
-                      {conversation.content && (
-                        <p className="text-xs text-gray-600 truncate">
-                          {conversation.senderId?.toString() === currentUserId ? 'You: ' : ''}
-                          {conversation.content}
-                        </p>
+                      {isTyping ? (
+                        <p className="text-xs text-primary-600 truncate animate-pulse">Typing...</p>
+                      ) : (
+                        conversation.content && (
+                          <p className="text-xs text-gray-600 truncate">
+                            {senderId === currentUserId ? 'You: ' : ''}
+                            {conversation.content}
+                          </p>
+                        )
                       )}
                       
-                      {conversation.isRead === false && conversation.senderId?.toString() !== currentUserId && (
+                      {conversation.isRead === false && senderId !== currentUserId && (
                         <Badge variant="primary" size="sm" rounded>New</Badge>
                       )}
                     </div>

@@ -74,6 +74,7 @@ app.get('/',(req,res)=> res.send('Server is running!'));
 const activeUsers = new Map();
 const buildAvatarUrl = (displayName) =>
     `https://ui-avatars.com/api/?name=${encodeURIComponent(displayName || 'User')}&background=random`;
+const normalizeUserId = (value) => value?.toString();
 
 io.use(async (socket, next) => {
     const token = socket.handshake.auth.token;
@@ -109,7 +110,7 @@ io.on('connection', (socket) => {
     socket.join(`user:${socket.userId}`);
 
     // ============= MESSAGE EVENTS =============
-    const toMessagePayload = (messageDoc, senderUser, receiverUser) => ({
+    const toMessagePayload = (messageDoc, senderUser, receiverUser, clientId = null) => ({
         id: messageDoc._id.toString(),
         senderId: messageDoc.senderId.toString(),
         senderName: senderUser?.username || senderUser?.email?.split('@')[0] || 'User',
@@ -120,7 +121,8 @@ io.on('connection', (socket) => {
         content: messageDoc.content,
         timestamp: messageDoc.createdAt,
         createdAt: messageDoc.createdAt,
-        isRead: Boolean(messageDoc.isRead)
+        isRead: Boolean(messageDoc.isRead),
+        clientId
     });
 
     /**
@@ -130,10 +132,10 @@ io.on('connection', (socket) => {
      */
     socket.on('message:send', async (data) => {
         try {
-            const { receiverId, content } = data;
+            const { receiverId, content, clientId } = data;
             
             if (!receiverId || !content.trim()) {
-                socket.emit('message:error', { error: 'Invalid message data' });
+                socket.emit('message:error', { error: 'Invalid message data', clientId });
                 return;
             }
 
@@ -154,7 +156,8 @@ io.on('connection', (socket) => {
             const messagePayload = toMessagePayload(
                 message,
                 socket.user,
-                receiverUser
+                receiverUser,
+                clientId || null
             );
 
             try {
@@ -211,7 +214,7 @@ io.on('connection', (socket) => {
 
         } catch (err) {
             console.error('Message send error:', err);
-            socket.emit('message:error', { error: err.message });
+            socket.emit('message:error', { error: err.message, clientId: data?.clientId || null });
         }
     });
 
@@ -246,6 +249,33 @@ io.on('connection', (socket) => {
                 isRead: msg.isRead
             }));
 
+            const unreadIncomingIds = formattedMessages
+                .filter(msg =>
+                    normalizeUserId(msg.senderId) === normalizeUserId(otherUserId) &&
+                    normalizeUserId(msg.receiverId) === normalizeUserId(socket.userId) &&
+                    !msg.isRead
+                )
+                .map(msg => msg.id);
+
+            if (unreadIncomingIds.length > 0) {
+                await Message.updateMany(
+                    { _id: { $in: unreadIncomingIds } },
+                    { $set: { isRead: true } }
+                );
+
+                formattedMessages.forEach(msg => {
+                    if (unreadIncomingIds.includes(msg.id)) {
+                        msg.isRead = true;
+                    }
+                });
+
+                io.to(`user:${otherUserId}`).emit('message:read:update', {
+                    messageIds: unreadIncomingIds,
+                    readerId: socket.userId,
+                    conversationWith: otherUserId
+                });
+            }
+
             socket.emit('messages:loaded', formattedMessages);
             console.log(`Loaded ${formattedMessages.length} messages for user ${socket.userId}`);
 
@@ -263,9 +293,24 @@ io.on('connection', (socket) => {
     socket.on('message:read', async (data) => {
         try {
             const { messageId } = data;
-            await Message.findByIdAndUpdate(messageId, { isRead: true });
+            const updatedMessage = await Message.findOneAndUpdate(
+                { _id: messageId, receiverId: socket.userId },
+                { isRead: true },
+                { new: true }
+            );
+
+            if (!updatedMessage) {
+                socket.emit('message:error', { error: 'Message not found or cannot be marked as read' });
+                return;
+            }
             
             socket.emit('message:read:confirmed', { messageId });
+
+            io.to(`user:${updatedMessage.senderId.toString()}`).emit('message:read:update', {
+                messageIds: [updatedMessage._id.toString()],
+                readerId: socket.userId,
+                conversationWith: updatedMessage.receiverId.toString()
+            });
         } catch (err) {
             console.error('Mark read error:', err);
             socket.emit('message:error', { error: err.message });
@@ -331,10 +376,13 @@ io.on('connection', (socket) => {
      */
     socket.on('typing:start', (data) => {
         const { receiverId } = data;
+        if (!receiverId) return;
         io.to(`user:${receiverId}`).emit('typing:indicator', {
             userId: socket.userId,
             username: socket.user.username,
-            isTyping: true
+            toUserId: receiverId,
+            isTyping: true,
+            timestamp: new Date().toISOString()
         });
     });
 
@@ -345,10 +393,13 @@ io.on('connection', (socket) => {
      */
     socket.on('typing:stop', (data) => {
         const { receiverId } = data;
+        if (!receiverId) return;
         io.to(`user:${receiverId}`).emit('typing:indicator', {
             userId: socket.userId,
             username: socket.user.username,
-            isTyping: false
+            toUserId: receiverId,
+            isTyping: false,
+            timestamp: new Date().toISOString()
         });
     });
 

@@ -35,12 +35,12 @@ class SocketService {
     }
   }
 
-  sendMessage(receiverId: string, content: string): void {
+  sendMessage(receiverId: string, content: string, clientId?: string): void {
     if (!this.socket?.connected) {
       console.error('Socket not connected');
       return;
     }
-    this.socket.emit('message:send', { receiverId, content });
+    this.socket.emit('message:send', { receiverId, content, clientId });
   }
 
   loadMessages(otherUserId: string, limit: number = 50): void {

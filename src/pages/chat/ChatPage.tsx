@@ -11,26 +11,85 @@ import { Message } from '../../types';
 import socketService from '../../services/socketService';
 import { MessageCircle } from 'lucide-react';
 
+type MessageStatus = 'sending' | 'sent' | 'read' | 'failed';
+type ChatMessageItem = Message & { clientId?: string; status?: MessageStatus };
+
 export const ChatPage: React.FC = () => {
   const { userId } = useParams<{ userId: string }>();
   const { user: currentUser } = useAuth();
+  const currentUserId = (currentUser as any)?.id?.toString?.() || (currentUser as any)?._id?.toString?.() || '';
   const navigate = useNavigate();
-  const [messages, setMessages] = useState<Message[]>([]);
+  const [messages, setMessages] = useState<ChatMessageItem[]>([]);
   const [newMessage, setNewMessage] = useState('');
   const [conversations, setConversations] = useState<any[]>([]);
   const [isTyping, setIsTyping] = useState(false);
   const [isConnected, setIsConnected] = useState(false);
   const [typingUsers, setTypingUsers] = useState<Set<string>>(new Set());
   const [isLoadingMessages, setIsLoadingMessages] = useState(false);
-  const [sendingMessage, setSendingMessage] = useState(false);
   const [showMobileMenu, setShowMobileMenu] = useState(true);
   const [chatPartner, setChatPartner] = useState<any>(null);
   const [loadingChatPartner, setLoadingChatPartner] = useState(false);
   const messagesEndRef = useRef<null | HTMLDivElement>(null);
-  const typingTimeoutRef = useRef();
+  const typingTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const toFormattedMessage = (message: any, status?: MessageStatus): ChatMessageItem => ({
+    id: message.id?.toString(),
+    senderId: message.senderId?.toString(),
+    receiverId: message.receiverId?.toString(),
+    content: message.content,
+    timestamp: message.timestamp,
+    isRead: Boolean(message.isRead),
+    senderName: message.senderName,
+    senderAvatar: message.senderAvatar,
+    receiverName: message.receiverName,
+    receiverAvatar: message.receiverAvatar,
+    clientId: message.clientId?.toString(),
+    status
+  });
+
+  const upsertConversation = (conversationList: any[], message: any) => {
+    if (!currentUser) return conversationList;
+
+    const updated = [...conversationList];
+    const index = updated.findIndex(
+      c => (c.senderId === message.senderId && c.receiverId === message.receiverId) ||
+           (c.receiverId === message.senderId && c.senderId === message.receiverId)
+    );
+
+    if (index >= 0) {
+      updated[index] = message;
+      const [item] = updated.splice(index, 1);
+      updated.unshift(item);
+    } else {
+      updated.unshift(message);
+    }
+
+    return updated;
+  };
+
+  const isMessageForCurrentChat = (message: any) => {
+    const senderId = message?.senderId?.toString?.();
+    const receiverId = message?.receiverId?.toString?.();
+    const selectedUserId = userId?.toString?.();
+    if (!selectedUserId || !senderId || !receiverId) return false;
+
+    if (!currentUserId) {
+      return senderId === selectedUserId || receiverId === selectedUserId;
+    }
+
+    return (
+      (senderId === selectedUserId && receiverId === currentUserId) ||
+      (senderId === currentUserId && receiverId === selectedUserId)
+    );
+  };
 
   // Fetch chat partner from API
   useEffect(() => {
+    if (userId && currentUserId && userId === currentUserId) {
+      navigate('/messages');
+      return;
+    }
+
     if (!userId) {
       setChatPartner(null);
       return;
@@ -66,7 +125,7 @@ export const ChatPage: React.FC = () => {
     };
 
     fetchChatPartner();
-  }, [userId]);
+  }, [userId, currentUserId, navigate]);
 
   // Initialize Socket Connection
   useEffect(() => {
@@ -91,54 +150,69 @@ export const ChatPage: React.FC = () => {
 
     // Listen for messages
     socketService.on('message:received', (message: any) => {
-      if (message.senderId === userId || message.receiverId === userId) {
-        const formattedMessage: Message = {
-          id: message.id?.toString(),
-          senderId: message.senderId?.toString(),
-          receiverId: message.receiverId?.toString(),
-          content: message.content,
-          timestamp: message.timestamp,
-          isRead: message.isRead,
-          senderName: message.senderName,
-          senderAvatar: message.senderAvatar,
-          receiverName: message.receiverName,
-          receiverAvatar: message.receiverAvatar
-        };
-        setMessages(prev => [...prev, formattedMessage]);
+      const senderId = message.senderId?.toString();
+      const receiverId = message.receiverId?.toString();
+      const isCurrentConversation = isMessageForCurrentChat(message);
+
+      if (isCurrentConversation) {
+        const formattedMessage = toFormattedMessage(
+          message,
+          message.isRead ? 'read' : (senderId === currentUserId ? 'sent' : undefined)
+        );
+
+        setMessages(prev => {
+          if (prev.some(item => item.id === formattedMessage.id)) {
+            return prev;
+          }
+          return [...prev, formattedMessage];
+        });
+
+        if (senderId === userId && receiverId === currentUserId && formattedMessage.id) {
+          socketService.markAsRead(formattedMessage.id);
+        }
       }
+
+      setConversations(prev => upsertConversation(prev, message));
     });
 
     socketService.on('message:sent', (message: any) => {
-      setSendingMessage(false);
-      const formattedMessage: Message = {
-        id: message.id?.toString(),
-        senderId: message.senderId?.toString(),
-        receiverId: message.receiverId?.toString(),
-        content: message.content,
-        timestamp: message.timestamp,
-        isRead: message.isRead,
-        senderName: message.senderName,
-        senderAvatar: message.senderAvatar,
-        receiverName: message.receiverName,
-        receiverAvatar: message.receiverAvatar
-      };
-      setMessages(prev => [...prev, formattedMessage]);
+      if (!isMessageForCurrentChat(message)) {
+        setConversations(prev => upsertConversation(prev, message));
+        return;
+      }
+
+      const formattedMessage = toFormattedMessage(message, message.isRead ? 'read' : 'sent');
+
+      setMessages(prev => {
+        const ackIndex = message.clientId
+          ? prev.findIndex(item => item.clientId === message.clientId || item.id === message.clientId)
+          : -1;
+
+        if (ackIndex >= 0) {
+          const updated = [...prev];
+          updated[ackIndex] = formattedMessage;
+          return updated;
+        }
+
+        if (prev.some(item => item.id === formattedMessage.id)) {
+          return prev;
+        }
+
+        return [...prev, formattedMessage];
+      });
+
+      setConversations(prev => upsertConversation(prev, message));
     });
 
     socketService.on('messages:loaded', (msgs: any[]) => {
       setIsLoadingMessages(false);
-      const formattedMessages: Message[] = msgs.map(msg => ({
-        id: msg.id?.toString(),
-        senderId: msg.senderId?.toString(),
-        receiverId: msg.receiverId?.toString(),
-        content: msg.content,
-        timestamp: msg.timestamp,
-        isRead: msg.isRead,
-        senderName: msg.senderName,
-        senderAvatar: msg.senderAvatar,
-        receiverName: msg.receiverName,
-        receiverAvatar: msg.receiverAvatar
-      }));
+      const formattedMessages: ChatMessageItem[] = msgs.map(msg => {
+        const senderId = msg.senderId?.toString();
+        const status: MessageStatus | undefined =
+          senderId === currentUserId ? (msg.isRead ? 'read' : 'sent') : undefined;
+
+        return toFormattedMessage(msg, status);
+      });
       setMessages(formattedMessages);
     });
 
@@ -146,21 +220,50 @@ export const ChatPage: React.FC = () => {
       setConversations(convs);
     });
 
+    socketService.on('conversation:update', (message: any) => {
+      setConversations(prev => upsertConversation(prev, message));
+    });
+
     socketService.on('typing:indicator', (data: any) => {
+      const typingUserId = data.userId?.toString();
+      if (!typingUserId || typingUserId !== userId) return;
+
       if (data.isTyping) {
-        setTypingUsers(prev => new Set([...prev, data.userId]));
+        setTypingUsers(prev => new Set([...prev, typingUserId]));
       } else {
         setTypingUsers(prev => {
           const updated = new Set(prev);
-          updated.delete(data.userId);
+          updated.delete(typingUserId);
           return updated;
         });
       }
     });
 
+    socketService.on('message:read:update', (data: any) => {
+      const readIds = Array.isArray(data.messageIds) ? data.messageIds.map((id: any) => id?.toString()) : [];
+      if (readIds.length === 0) return;
+
+      setMessages(prev =>
+        prev.map(msg =>
+          readIds.includes(msg.id)
+            ? { ...msg, isRead: true, status: 'read' }
+            : msg
+        )
+      );
+    });
+
     socketService.on('message:error', (data: any) => {
       console.error('Socket error:', data.error);
-      setSendingMessage(false);
+      setIsLoadingMessages(false);
+      if (data?.clientId) {
+        setMessages(prev =>
+          prev.map(msg =>
+            msg.clientId === data.clientId || msg.id === data.clientId
+              ? { ...msg, status: 'failed' }
+              : msg
+          )
+        );
+      }
     });
 
     return () => {
@@ -168,10 +271,12 @@ export const ChatPage: React.FC = () => {
       socketService.off('message:sent');
       socketService.off('messages:loaded');
       socketService.off('conversations:loaded');
+      socketService.off('conversation:update');
       socketService.off('typing:indicator');
+      socketService.off('message:read:update');
       socketService.off('message:error');
     };
-  }, [currentUser, userId]);
+  }, [currentUser, currentUserId, userId]);
 
   // Load conversations
   useEffect(() => {
@@ -193,24 +298,62 @@ export const ChatPage: React.FC = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
 
+  useEffect(() => () => {
+    if (typingTimeoutRef.current) {
+      clearTimeout(typingTimeoutRef.current);
+      typingTimeoutRef.current = null;
+    }
+    if (isTyping && userId) {
+      socketService.typingStop(userId);
+    }
+  }, [isTyping, userId]);
+
   const handleSendMessage = (e: React.FormEvent) => {
     e.preventDefault();
 
-    if (!newMessage.trim() || !currentUser || !userId || !isConnected) return;
+    if (!newMessage.trim() || !currentUser || !currentUserId || !userId || !isConnected) return;
+    if (userId === currentUserId) return;
 
-    setSendingMessage(true);
-    socketService.sendMessage(userId, newMessage.trim());
+    const trimmedMessage = newMessage.trim();
+    const clientId = `temp-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+    const optimisticMessage: ChatMessageItem = {
+      id: clientId,
+      clientId,
+      senderId: currentUserId,
+      receiverId: userId,
+      content: trimmedMessage,
+      timestamp: new Date().toISOString(),
+      isRead: false,
+      senderName: currentUser.name,
+      senderAvatar: currentUser.avatarUrl,
+      receiverName: chatPartner?.name,
+      receiverAvatar: chatPartner?.avatarUrl,
+      status: 'sending'
+    };
+
+    setMessages(prev => [...prev, optimisticMessage]);
+    setConversations(prev => upsertConversation(prev, optimisticMessage));
+    socketService.sendMessage(userId, trimmedMessage, clientId);
     setNewMessage('');
-    setIsTyping(false);
+    if (isTyping) {
+      socketService.typingStop(userId);
+      setIsTyping(false);
+    }
   };
 
   const handleTyping = (e: React.ChangeEvent<HTMLInputElement>) => {
-    setNewMessage(e.target.value);
+    const value = e.target.value;
+    setNewMessage(value);
 
     // Send typing indicator
-    if (!isTyping && userId) {
+    if (value.trim().length > 0 && !isTyping && userId) {
       setIsTyping(true);
       socketService.typingStart(userId);
+    }
+
+    if (value.trim().length === 0 && isTyping && userId) {
+      socketService.typingStop(userId);
+      setIsTyping(false);
     }
 
     // Clear previous timeout
@@ -322,7 +465,8 @@ export const ChatPage: React.FC = () => {
                     <ChatMessage
                       key={message.id}
                       message={message}
-                      isCurrentUser={message.senderId === currentUser.id}
+                      isCurrentUser={message.senderId === currentUserId}
+                      status={message.status}
                     />
                   ))}
                   {typingUsers.has(userId) && (
@@ -333,12 +477,6 @@ export const ChatPage: React.FC = () => {
                         <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '0.2s' }}></div>
                       </div>
                       <span className="text-xs">{chatPartner.name} is typing...</span>
-                    </div>
-                  )}
-                  {sendingMessage && (
-                    <div className="flex items-center space-x-2 text-gray-500">
-                      <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-primary-600"></div>
-                      <span className="text-xs">Sending...</span>
                     </div>
                   )}
                   <div ref={messagesEndRef} />
@@ -381,22 +519,18 @@ export const ChatPage: React.FC = () => {
                   onChange={handleTyping}
                   fullWidth
                   className="flex-1"
-                  disabled={!isConnected || sendingMessage}
+                  disabled={!isConnected}
                 />
                 
                 <Button
                   type="submit"
                   size="sm"
-                  disabled={!newMessage.trim() || !isConnected || sendingMessage}
+                  disabled={!newMessage.trim() || !isConnected}
                   className="rounded-full p-2 w-10 h-10 flex items-center justify-center"
                   aria-label="Send message"
                   title={!isConnected ? "Waiting for connection..." : "Send message"}
                 >
-                  {sendingMessage ? (
-                    <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>
-                  ) : (
-                    <Send size={18} />
-                  )}
+                  <Send size={18} />
                 </Button>
               </form>
             </div>
