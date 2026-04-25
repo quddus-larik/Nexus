@@ -4,7 +4,8 @@
   "description": "",
   "main": "index.js",
   "scripts": {
-    "server": "nodemon main.js"
+    "server": "nodemon main.js",
+    "start": "node main.js"
   },
   "keywords": [],
   "author": "Quddus",
