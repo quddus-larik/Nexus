@@ -12,7 +12,6 @@ const userProfileRouter = require('./src/routes/user/user.profile');
 const entrepreneurProfileRouter = require('./src/routes/entrepreneur/entrepreneur.profile');
 const investorProfileRouter = require('./src/routes/investor/investor.profile');
 const dealRouter = require('./src/routes/deals');
-const dashboardRouter = require('./src/routes/dashboard');
 const authenticateTokenMiddleware = require('./src/middlewares/auth.proxy');
 const connectDB = require('./database/mongodb.connection');
 const User = require('./src/models/user.model');
@@ -25,7 +24,6 @@ const server = createServer(app);
 const io = new Server(server, {
     cors: { origin: "*" }
 });
-app.set('io', io);
 
 app.use(express.json());
 app.use(cors({ origin: "*" }));
@@ -65,7 +63,6 @@ app.use('/user', userRoleRouter); // /user/role
 app.use('/entrepreneur', entrepreneurProfileRouter); // /entrepreneur/:id (public profile)
 app.use('/investor', investorProfileRouter); // /investor/:id (public profile)
 app.use('/users', authenticateTokenMiddleware, userProfileRouter); // /users/:id
-app.use('/dashboard', authenticateTokenMiddleware, dashboardRouter); // /dashboard
 app.use('/notifications', authenticateTokenMiddleware, notificationRouter); // /notifications
 app.use('/deals', authenticateTokenMiddleware, dealRouter); // /deals
 
@@ -75,42 +72,8 @@ app.get('/',(req,res)=> res.send('Server is running!'));
 
 // Track active users
 const activeUsers = new Map();
-const activeCalls = new Map();
 const buildAvatarUrl = (displayName) =>
     `https://ui-avatars.com/api/?name=${encodeURIComponent(displayName || 'User')}&background=random`;
-const buildDisplayName = (user) => user?.username || user?.email?.split('@')[0] || 'User';
-const buildCallRoomId = (userA, userB) => [String(userA), String(userB)].sort().join('-');
-
-const isUserInActiveCall = (userId) =>
-    Array.from(activeCalls.values()).some((call) =>
-        call.callerId === String(userId) || call.receiverId === String(userId)
-    );
-
-const getPeerIdFromCall = (call, userId) =>
-    call.callerId === String(userId) ? call.receiverId : call.callerId;
-
-const endCallSession = (roomId, { endedBy = null, reason = 'ended', notifyPeer = true } = {}) => {
-    const call = activeCalls.get(roomId);
-    if (!call) {
-        return null;
-    }
-
-    activeCalls.delete(roomId);
-
-    if (notifyPeer) {
-        const peerId = call.callerId === String(endedBy) ? call.receiverId : call.callerId;
-        if (peerId) {
-            io.to(`user:${peerId}`).emit('call:end', {
-                roomId,
-                endedBy,
-                reason,
-                callType: call.callType
-            });
-        }
-    }
-
-    return call;
-};
 
 io.use(async (socket, next) => {
     const token = socket.handshake.auth.token;
@@ -128,7 +91,7 @@ io.use(async (socket, next) => {
 io.on('connection', (socket) => {
     console.log(`User Connected: ${socket.userId} (Socket ID: ${socket.id})`);
 
-    const displayName = buildDisplayName(socket.user);
+    const displayName = socket.user.username || socket.user.email?.split('@')[0] || 'User';
     
     // Track active user
     activeUsers.set(socket.userId, {
@@ -389,189 +352,10 @@ io.on('connection', (socket) => {
         });
     });
 
-    // ============= CALL SIGNALING =============
-
-    socket.on('call:initiate', async (data) => {
-        try {
-            const { targetUserId, roomId, callType, offer } = data || {};
-            const receiverId = String(targetUserId || '');
-            const callRoomId = roomId || buildCallRoomId(socket.userId, receiverId);
-
-            if (!receiverId || !offer || !callType) {
-                socket.emit('call:error', { error: 'Invalid call payload' });
-                return;
-            }
-
-            if (receiverId === String(socket.userId)) {
-                socket.emit('call:error', { error: 'You cannot call yourself' });
-                return;
-            }
-
-            if (!activeUsers.has(receiverId)) {
-                socket.emit('call:error', { error: 'The other user is offline' });
-                return;
-            }
-
-            if (isUserInActiveCall(socket.userId) || isUserInActiveCall(receiverId)) {
-                socket.emit('call:error', { error: 'One of the users is already on another call' });
-                return;
-            }
-
-            activeCalls.set(callRoomId, {
-                roomId: callRoomId,
-                callerId: String(socket.userId),
-                receiverId,
-                callType,
-                offer,
-                status: 'ringing',
-                startedAt: new Date().toISOString()
-            });
-
-            io.to(`user:${receiverId}`).emit('call:incoming', {
-                roomId: callRoomId,
-                callerId: String(socket.userId),
-                callerName: buildDisplayName(socket.user),
-                callerAvatar: socket.user.avatarUrl || buildAvatarUrl(buildDisplayName(socket.user)),
-                receiverId,
-                callType,
-                offer,
-                startedAt: new Date().toISOString()
-            });
-        } catch (err) {
-            console.error('Call initiate error:', err);
-            socket.emit('call:error', { error: err.message });
-        }
-    });
-
-    socket.on('call:answer', async (data) => {
-        try {
-            const { targetUserId, roomId, answer } = data || {};
-            const callRoomId = roomId || buildCallRoomId(socket.userId, targetUserId);
-            const call = activeCalls.get(callRoomId);
-
-            if (!call || !answer) {
-                socket.emit('call:error', { error: 'Call session not found' });
-                return;
-            }
-
-            if (String(socket.userId) !== String(call.receiverId)) {
-                socket.emit('call:error', { error: 'Only the receiving user can answer this call' });
-                return;
-            }
-
-            call.answer = answer;
-            call.status = 'connected';
-            activeCalls.set(callRoomId, call);
-
-            io.to(`user:${call.callerId}`).emit('call:answer', {
-                roomId: callRoomId,
-                answer,
-                responderId: String(socket.userId)
-            });
-        } catch (err) {
-            console.error('Call answer error:', err);
-            socket.emit('call:error', { error: err.message });
-        }
-    });
-
-    socket.on('call:decline', (data) => {
-        try {
-            const { targetUserId, roomId, reason = 'declined' } = data || {};
-            const callRoomId = roomId || buildCallRoomId(socket.userId, targetUserId);
-            const call = activeCalls.get(callRoomId);
-
-            if (!call) {
-                return;
-            }
-
-            if (String(socket.userId) !== String(call.receiverId)) {
-                return;
-            }
-
-            activeCalls.delete(callRoomId);
-            io.to(`user:${call.callerId}`).emit('call:declined', {
-                roomId: callRoomId,
-                declinedBy: String(socket.userId),
-                reason,
-                callType: call.callType
-            });
-        } catch (err) {
-            console.error('Call decline error:', err);
-        }
-    });
-
-    socket.on('call:ice-candidate', (data) => {
-        try {
-            const { targetUserId, roomId, candidate } = data || {};
-            const callRoomId = roomId || buildCallRoomId(socket.userId, targetUserId);
-            const call = activeCalls.get(callRoomId);
-
-            if (!call || !candidate) {
-                return;
-            }
-
-            const peerId = getPeerIdFromCall(call, socket.userId);
-            io.to(`user:${peerId}`).emit('call:ice-candidate', {
-                roomId: callRoomId,
-                candidate,
-                senderId: String(socket.userId)
-            });
-        } catch (err) {
-            console.error('Call ICE candidate error:', err);
-        }
-    });
-
-    socket.on('call:end', (data) => {
-        try {
-            const { targetUserId, roomId, reason = 'ended' } = data || {};
-            const callRoomId = roomId || buildCallRoomId(socket.userId, targetUserId);
-            const call = activeCalls.get(callRoomId);
-
-            if (!call) {
-                return;
-            }
-
-            const peerId = getPeerIdFromCall(call, socket.userId);
-            endCallSession(callRoomId, {
-                endedBy: String(socket.userId),
-                reason,
-                notifyPeer: false
-            });
-
-            io.to(`user:${peerId}`).emit('call:end', {
-                roomId: callRoomId,
-                endedBy: String(socket.userId),
-                reason,
-                callType: call.callType
-            });
-        } catch (err) {
-            console.error('Call end error:', err);
-        }
-    });
-
     // ============= DISCONNECT =============
 
     socket.on('disconnect', () => {
         console.log(`User Disconnected: ${socket.userId}`);
-
-        for (const [roomId, call] of activeCalls.entries()) {
-            if (call.callerId === String(socket.userId) || call.receiverId === String(socket.userId)) {
-                const peerId = getPeerIdFromCall(call, socket.userId);
-                endCallSession(roomId, {
-                    endedBy: String(socket.userId),
-                    reason: 'disconnect',
-                    notifyPeer: false
-                });
-
-                io.to(`user:${peerId}`).emit('call:end', {
-                    roomId,
-                    endedBy: String(socket.userId),
-                    reason: 'disconnect',
-                    callType: call.callType
-                });
-            }
-        }
-
         activeUsers.delete(socket.userId);
         
         // Broadcast updated online users
