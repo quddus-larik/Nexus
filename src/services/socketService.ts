@@ -74,6 +74,26 @@ class SocketService {
     this.socket.emit('typing:stop', { receiverId });
   }
 
+  sendCallOffer(receiverId: string, offer: RTCSessionDescriptionInit, callType: 'video' | 'audio' = 'video'): void {
+    if (!this.socket?.connected) return;
+    this.socket.emit('call:offer', { receiverId, offer, callType });
+  }
+
+  sendCallAnswer(receiverId: string, answer: RTCSessionDescriptionInit): void {
+    if (!this.socket?.connected) return;
+    this.socket.emit('call:answer', { receiverId, answer });
+  }
+
+  sendIceCandidate(receiverId: string, candidate: RTCIceCandidateInit): void {
+    if (!this.socket?.connected) return;
+    this.socket.emit('call:ice-candidate', { receiverId, candidate });
+  }
+
+  endCall(receiverId: string, reason: string = 'ended'): void {
+    if (!this.socket?.connected) return;
+    this.socket.emit('call:end', { receiverId, reason });
+  }
+
   on(event: string, callback: (data: any) => void): void {
     if (!this.socket) return;
     this.socket.on(event, callback);

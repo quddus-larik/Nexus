@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
-import { Send, Phone, Video, Info, Smile, ArrowLeft, MoreVertical, AlertCircle } from 'lucide-react';
+import { Send, Phone, Video, Smile, ArrowLeft, MoreVertical, AlertCircle, Mic, MicOff, VideoOff, PhoneOff } from 'lucide-react';
 import { Avatar } from '../../components/ui/Avatar';
 import { Button } from '../../components/ui/Button';
 import { Input } from '../../components/ui/Input';
@@ -13,6 +13,12 @@ import { MessageCircle } from 'lucide-react';
 
 type MessageStatus = 'sending' | 'sent' | 'read' | 'failed';
 type ChatMessageItem = Message & { clientId?: string; status?: MessageStatus };
+type CallStatus = 'idle' | 'calling' | 'ringing' | 'in-call';
+type IncomingCall = {
+  fromUserId: string;
+  fromName?: string;
+  offer: RTCSessionDescriptionInit;
+};
 
 export const ChatPage: React.FC = () => {
   const { userId } = useParams<{ userId: string }>();
@@ -29,8 +35,20 @@ export const ChatPage: React.FC = () => {
   const [showMobileMenu, setShowMobileMenu] = useState(true);
   const [chatPartner, setChatPartner] = useState<any>(null);
   const [loadingChatPartner, setLoadingChatPartner] = useState(false);
+  const [callStatus, setCallStatus] = useState<CallStatus>('idle');
+  const [incomingCall, setIncomingCall] = useState<IncomingCall | null>(null);
+  const [isMicMuted, setIsMicMuted] = useState(false);
+  const [isCameraOff, setIsCameraOff] = useState(false);
+  const [callError, setCallError] = useState('');
   const messagesEndRef = useRef<null | HTMLDivElement>(null);
   const typingTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const localVideoRef = useRef<HTMLVideoElement | null>(null);
+  const remoteVideoRef = useRef<HTMLVideoElement | null>(null);
+  const localStreamRef = useRef<MediaStream | null>(null);
+  const remoteStreamRef = useRef<MediaStream | null>(null);
+  const peerConnectionRef = useRef<RTCPeerConnection | null>(null);
+  const activeCallUserIdRef = useRef<string | null>(null);
+  const callStatusRef = useRef<CallStatus>('idle');
 
   const toFormattedMessage = (message: any, status?: MessageStatus): ChatMessageItem => ({
     id: message.id?.toString(),
@@ -82,6 +100,181 @@ export const ChatPage: React.FC = () => {
       (senderId === currentUserId && receiverId === selectedUserId)
     );
   };
+
+  const stopLocalTracks = () => {
+    if (localStreamRef.current) {
+      localStreamRef.current.getTracks().forEach(track => track.stop());
+      localStreamRef.current = null;
+    }
+  };
+
+  const cleanupCall = () => {
+    if (peerConnectionRef.current) {
+      peerConnectionRef.current.onicecandidate = null;
+      peerConnectionRef.current.ontrack = null;
+      peerConnectionRef.current.onconnectionstatechange = null;
+      peerConnectionRef.current.close();
+      peerConnectionRef.current = null;
+    }
+
+    stopLocalTracks();
+
+    if (localVideoRef.current) {
+      localVideoRef.current.srcObject = null;
+    }
+
+    if (remoteVideoRef.current) {
+      remoteVideoRef.current.srcObject = null;
+    }
+
+    remoteStreamRef.current = null;
+    activeCallUserIdRef.current = null;
+    setCallStatus('idle');
+    setIncomingCall(null);
+    setCallError('');
+    setIsMicMuted(false);
+    setIsCameraOff(false);
+  };
+
+  const ensureLocalMedia = async () => {
+    if (localStreamRef.current) return localStreamRef.current;
+
+    const stream = await navigator.mediaDevices.getUserMedia({
+      video: true,
+      audio: true
+    });
+
+    localStreamRef.current = stream;
+    if (localVideoRef.current) {
+      localVideoRef.current.srcObject = stream;
+    }
+    return stream;
+  };
+
+  const createPeerConnection = (targetUserId: string) => {
+    if (peerConnectionRef.current) return peerConnectionRef.current;
+
+    const pc = new RTCPeerConnection({
+      iceServers: [
+        { urls: 'stun:stun.l.google.com:19302' },
+        { urls: 'stun:stun1.l.google.com:19302' }
+      ]
+    });
+
+    pc.onicecandidate = (event) => {
+      if (event.candidate) {
+        socketService.sendIceCandidate(targetUserId, event.candidate.toJSON());
+      }
+    };
+
+    pc.ontrack = (event) => {
+      if (!remoteStreamRef.current) {
+        remoteStreamRef.current = new MediaStream();
+      }
+
+      event.streams[0]?.getTracks().forEach(track => {
+        remoteStreamRef.current?.addTrack(track);
+      });
+
+      if (remoteVideoRef.current) {
+        remoteVideoRef.current.srcObject = remoteStreamRef.current;
+      }
+    };
+
+    pc.onconnectionstatechange = () => {
+      const state = pc.connectionState;
+      if (state === 'failed' || state === 'disconnected' || state === 'closed') {
+        cleanupCall();
+      }
+    };
+
+    peerConnectionRef.current = pc;
+    activeCallUserIdRef.current = targetUserId;
+    return pc;
+  };
+
+  const startVideoCall = async () => {
+    if (!userId || !currentUserId || userId === currentUserId) return;
+
+    try {
+      setCallError('');
+      setCallStatus('calling');
+      const stream = await ensureLocalMedia();
+      const pc = createPeerConnection(userId);
+
+      stream.getTracks().forEach(track => {
+        pc.addTrack(track, stream);
+      });
+
+      const offer = await pc.createOffer();
+      await pc.setLocalDescription(offer);
+      socketService.sendCallOffer(userId, offer, 'video');
+    } catch (error) {
+      console.error('Start video call error:', error);
+      setCallError('Unable to start camera/microphone.');
+      cleanupCall();
+    }
+  };
+
+  const acceptIncomingCall = async () => {
+    if (!incomingCall) return;
+
+    try {
+      setCallError('');
+      const stream = await ensureLocalMedia();
+      const pc = createPeerConnection(incomingCall.fromUserId);
+
+      stream.getTracks().forEach(track => {
+        pc.addTrack(track, stream);
+      });
+
+      await pc.setRemoteDescription(new RTCSessionDescription(incomingCall.offer));
+      const answer = await pc.createAnswer();
+      await pc.setLocalDescription(answer);
+      socketService.sendCallAnswer(incomingCall.fromUserId, answer);
+      setCallStatus('in-call');
+      setIncomingCall(null);
+    } catch (error) {
+      console.error('Accept call error:', error);
+      setCallError('Unable to accept call.');
+      cleanupCall();
+    }
+  };
+
+  const rejectIncomingCall = () => {
+    if (!incomingCall) return;
+    socketService.endCall(incomingCall.fromUserId, 'rejected');
+    setIncomingCall(null);
+    setCallStatus('idle');
+  };
+
+  const endCurrentCall = () => {
+    const targetId = activeCallUserIdRef.current || userId || incomingCall?.fromUserId;
+    if (targetId) {
+      socketService.endCall(targetId, 'ended');
+    }
+    cleanupCall();
+  };
+
+  const toggleMic = () => {
+    if (!localStreamRef.current) return;
+    const audioTrack = localStreamRef.current.getAudioTracks()[0];
+    if (!audioTrack) return;
+    audioTrack.enabled = !audioTrack.enabled;
+    setIsMicMuted(!audioTrack.enabled);
+  };
+
+  const toggleCamera = () => {
+    if (!localStreamRef.current) return;
+    const videoTrack = localStreamRef.current.getVideoTracks()[0];
+    if (!videoTrack) return;
+    videoTrack.enabled = !videoTrack.enabled;
+    setIsCameraOff(!videoTrack.enabled);
+  };
+
+  useEffect(() => {
+    callStatusRef.current = callStatus;
+  }, [callStatus]);
 
   // Fetch chat partner from API
   useEffect(() => {
@@ -266,6 +459,50 @@ export const ChatPage: React.FC = () => {
       }
     });
 
+    socketService.on('call:offer', async (data: any) => {
+      const fromUserId = data?.fromUserId?.toString?.();
+      const offer = data?.offer;
+      if (!fromUserId || !offer) return;
+      if (callStatusRef.current !== 'idle') {
+        socketService.endCall(fromUserId, 'busy');
+        return;
+      }
+
+      setIncomingCall({
+        fromUserId,
+        fromName: data?.fromName || 'User',
+        offer
+      });
+      setCallStatus('ringing');
+    });
+
+    socketService.on('call:answer', async (data: any) => {
+      try {
+        const answer = data?.answer;
+        if (!answer || !peerConnectionRef.current) return;
+        await peerConnectionRef.current.setRemoteDescription(new RTCSessionDescription(answer));
+        setCallStatus('in-call');
+      } catch (error) {
+        console.error('Call answer error:', error);
+        setCallError('Call connection failed.');
+        cleanupCall();
+      }
+    });
+
+    socketService.on('call:ice-candidate', async (data: any) => {
+      try {
+        const candidate = data?.candidate;
+        if (!candidate || !peerConnectionRef.current) return;
+        await peerConnectionRef.current.addIceCandidate(new RTCIceCandidate(candidate));
+      } catch (error) {
+        console.error('ICE candidate error:', error);
+      }
+    });
+
+    socketService.on('call:end', () => {
+      cleanupCall();
+    });
+
     return () => {
       socketService.off('message:received');
       socketService.off('message:sent');
@@ -275,6 +512,10 @@ export const ChatPage: React.FC = () => {
       socketService.off('typing:indicator');
       socketService.off('message:read:update');
       socketService.off('message:error');
+      socketService.off('call:offer');
+      socketService.off('call:answer');
+      socketService.off('call:ice-candidate');
+      socketService.off('call:end');
     };
   }, [currentUser, currentUserId, userId]);
 
@@ -307,6 +548,16 @@ export const ChatPage: React.FC = () => {
       socketService.typingStop(userId);
     }
   }, [isTyping, userId]);
+
+  useEffect(() => {
+    return () => {
+      const targetId = activeCallUserIdRef.current;
+      if (targetId) {
+        socketService.endCall(targetId, 'left');
+      }
+      cleanupCall();
+    };
+  }, []);
 
   const handleSendMessage = (e: React.FormEvent) => {
     e.preventDefault();
@@ -427,6 +678,7 @@ export const ChatPage: React.FC = () => {
                   className="rounded-full p-2 hover:bg-gray-100"
                   aria-label="Voice call"
                   title="Coming soon"
+                  disabled
                 >
                   <Phone size={18} className="text-gray-600" />
                 </Button>
@@ -436,7 +688,9 @@ export const ChatPage: React.FC = () => {
                   size="sm"
                   className="rounded-full p-2 hover:bg-gray-100"
                   aria-label="Video call"
-                  title="Coming soon"
+                  title="Start video call"
+                  onClick={startVideoCall}
+                  disabled={!isConnected || !userId || userId === currentUserId || callStatus !== 'idle'}
                 >
                   <Video size={18} className="text-gray-600" />
                 </Button>
@@ -451,6 +705,102 @@ export const ChatPage: React.FC = () => {
                 </Button>
               </div>
             </div>
+
+            {(callStatus !== 'idle' || incomingCall || callError) && (
+              <div className="m-4 rounded-2xl border border-gray-200 bg-white shadow-lg overflow-hidden">
+                <div className="px-4 py-3 border-b border-gray-100 flex items-center justify-between">
+                  <div>
+                    <p className="text-sm font-semibold text-gray-900">Private Video Call</p>
+                    <p className="text-xs text-gray-500">
+                      {callStatus === 'calling' && `Calling ${chatPartner?.name || 'user'}...`}
+                      {callStatus === 'ringing' && `${incomingCall?.fromName || 'User'} is calling you`}
+                      {callStatus === 'in-call' && `Connected with ${chatPartner?.name || incomingCall?.fromName || 'user'}`}
+                    </p>
+                  </div>
+                  {(callStatus === 'calling' || callStatus === 'in-call') && (
+                    <button
+                      onClick={endCurrentCall}
+                      className="inline-flex items-center px-3 py-1.5 rounded-lg bg-red-600 text-white text-xs hover:bg-red-700"
+                    >
+                      End
+                    </button>
+                  )}
+                </div>
+
+                {callError && (
+                  <div className="px-4 py-2 bg-red-50 text-red-600 text-xs">{callError}</div>
+                )}
+
+                {callStatus === 'ringing' && incomingCall && (
+                  <div className="px-4 py-4 flex items-center justify-between bg-gray-50">
+                    <p className="text-sm text-gray-700">{incomingCall.fromName || 'User'} wants to start a video call.</p>
+                    <div className="flex items-center space-x-2">
+                      <button
+                        onClick={rejectIncomingCall}
+                        className="inline-flex items-center px-3 py-2 rounded-lg border border-gray-300 text-gray-700 text-xs hover:bg-gray-100"
+                      >
+                        Decline
+                      </button>
+                      <button
+                        onClick={acceptIncomingCall}
+                        className="inline-flex items-center px-3 py-2 rounded-lg bg-green-600 text-white text-xs hover:bg-green-700"
+                      >
+                        Accept
+                      </button>
+                    </div>
+                  </div>
+                )}
+
+                {(callStatus === 'calling' || callStatus === 'in-call') && (
+                  <div className="p-3 bg-white">
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                      <div className="rounded-xl bg-gray-100 border border-gray-200 overflow-hidden">
+                        <p className="px-3 py-1.5 text-xs text-gray-600 bg-white border-b border-gray-200">You</p>
+                        <video
+                          ref={localVideoRef}
+                          autoPlay
+                          muted
+                          playsInline
+                          className="w-full h-44 object-cover bg-gray-200"
+                        />
+                      </div>
+                      <div className="rounded-xl bg-gray-100 border border-gray-200 overflow-hidden">
+                        <p className="px-3 py-1.5 text-xs text-gray-600 bg-white border-b border-gray-200">{chatPartner?.name || 'Remote user'}</p>
+                        <video
+                          ref={remoteVideoRef}
+                          autoPlay
+                          playsInline
+                          className="w-full h-44 object-cover bg-gray-200"
+                        />
+                      </div>
+                    </div>
+                    <div className="mt-3 flex items-center justify-center space-x-2">
+                      <button
+                        onClick={toggleMic}
+                        className="inline-flex items-center px-3 py-2 rounded-lg border border-gray-300 text-gray-700 text-xs hover:bg-gray-100"
+                      >
+                        {isMicMuted ? <MicOff size={14} className="mr-1" /> : <Mic size={14} className="mr-1" />}
+                        {isMicMuted ? 'Unmute' : 'Mute'}
+                      </button>
+                      <button
+                        onClick={toggleCamera}
+                        className="inline-flex items-center px-3 py-2 rounded-lg border border-gray-300 text-gray-700 text-xs hover:bg-gray-100"
+                      >
+                        {isCameraOff ? <VideoOff size={14} className="mr-1" /> : <Video size={14} className="mr-1" />}
+                        {isCameraOff ? 'Camera On' : 'Camera Off'}
+                      </button>
+                      <button
+                        onClick={endCurrentCall}
+                        className="inline-flex items-center px-3 py-2 rounded-lg bg-red-600 text-white text-xs hover:bg-red-700"
+                      >
+                        <PhoneOff size={14} className="mr-1" />
+                        Hang Up
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
             
             {/* Messages container */}
             <div className="flex-1 p-4 overflow-y-auto bg-gray-50 space-y-4">

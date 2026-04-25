@@ -403,6 +403,70 @@ io.on('connection', (socket) => {
         });
     });
 
+    /**
+     * Forward WebRTC offer to a specific user
+     * Event: call:offer
+     * Data: { receiverId, offer, callType }
+     */
+    socket.on('call:offer', (data) => {
+        const { receiverId, offer, callType = 'video' } = data || {};
+        if (!receiverId || !offer) return;
+
+        io.to(`user:${receiverId}`).emit('call:offer', {
+            fromUserId: socket.userId,
+            fromName: socket.user.username || socket.user.email?.split('@')[0] || 'User',
+            fromAvatar: socket.user.avatarUrl || buildAvatarUrl(socket.user.username || socket.user.email?.split('@')[0] || 'User'),
+            offer,
+            callType,
+            timestamp: new Date().toISOString()
+        });
+    });
+
+    /**
+     * Forward WebRTC answer to a specific user
+     * Event: call:answer
+     * Data: { receiverId, answer }
+     */
+    socket.on('call:answer', (data) => {
+        const { receiverId, answer } = data || {};
+        if (!receiverId || !answer) return;
+
+        io.to(`user:${receiverId}`).emit('call:answer', {
+            fromUserId: socket.userId,
+            answer
+        });
+    });
+
+    /**
+     * Forward ICE candidates to a specific user
+     * Event: call:ice-candidate
+     * Data: { receiverId, candidate }
+     */
+    socket.on('call:ice-candidate', (data) => {
+        const { receiverId, candidate } = data || {};
+        if (!receiverId || !candidate) return;
+
+        io.to(`user:${receiverId}`).emit('call:ice-candidate', {
+            fromUserId: socket.userId,
+            candidate
+        });
+    });
+
+    /**
+     * End a call for a specific user
+     * Event: call:end
+     * Data: { receiverId, reason }
+     */
+    socket.on('call:end', (data) => {
+        const { receiverId, reason = 'ended' } = data || {};
+        if (!receiverId) return;
+
+        io.to(`user:${receiverId}`).emit('call:end', {
+            fromUserId: socket.userId,
+            reason
+        });
+    });
+
     // ============= DISCONNECT =============
 
     socket.on('disconnect', () => {
