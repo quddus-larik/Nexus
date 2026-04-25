@@ -19,7 +19,7 @@ class SocketService {
       console.log('Socket connected successfully');
     });
 
-    this.socket.on('connect_error', (error: Error) => {
+    this.socket.on('connect_error', (error: any) => {
       console.error('Socket connection error:', error);
     });
 
@@ -35,20 +35,12 @@ class SocketService {
     }
   }
 
-  emit(event: string, data?: unknown): void {
+  sendMessage(receiverId: string, content: string, clientId?: string): void {
     if (!this.socket?.connected) {
       console.error('Socket not connected');
       return;
     }
-    this.socket.emit(event, data);
-  }
-
-  sendMessage(receiverId: string, content: string): void {
-    if (!this.socket?.connected) {
-      console.error('Socket not connected');
-      return;
-    }
-    this.socket.emit('message:send', { receiverId, content });
+    this.socket.emit('message:send', { receiverId, content, clientId });
   }
 
   loadMessages(otherUserId: string, limit: number = 50): void {
@@ -82,48 +74,27 @@ class SocketService {
     this.socket.emit('typing:stop', { receiverId });
   }
 
-  startCall(data: {
-    targetUserId: string;
-    roomId: string;
-    callType: 'audio' | 'video';
-    offer: RTCSessionDescriptionInit;
-  }): void {
-    this.emit('call:initiate', data);
+  sendCallOffer(receiverId: string, offer: RTCSessionDescriptionInit, callType: 'video' | 'audio' = 'video'): void {
+    if (!this.socket?.connected) return;
+    this.socket.emit('call:offer', { receiverId, offer, callType });
   }
 
-  answerCall(data: {
-    targetUserId: string;
-    roomId: string;
-    answer: RTCSessionDescriptionInit;
-  }): void {
-    this.emit('call:answer', data);
+  sendCallAnswer(receiverId: string, answer: RTCSessionDescriptionInit): void {
+    if (!this.socket?.connected) return;
+    this.socket.emit('call:answer', { receiverId, answer });
   }
 
-  declineCall(data: {
-    targetUserId: string;
-    roomId: string;
-    reason?: string;
-  }): void {
-    this.emit('call:decline', data);
+  sendIceCandidate(receiverId: string, candidate: RTCIceCandidateInit): void {
+    if (!this.socket?.connected) return;
+    this.socket.emit('call:ice-candidate', { receiverId, candidate });
   }
 
-  sendIceCandidate(data: {
-    targetUserId: string;
-    roomId: string;
-    candidate: RTCIceCandidateInit;
-  }): void {
-    this.emit('call:ice-candidate', data);
+  endCall(receiverId: string, reason: string = 'ended'): void {
+    if (!this.socket?.connected) return;
+    this.socket.emit('call:end', { receiverId, reason });
   }
 
-  endCall(data: {
-    targetUserId: string;
-    roomId: string;
-    reason?: string;
-  }): void {
-    this.emit('call:end', data);
-  }
-
-  on(event: string, callback: (data: unknown) => void): void {
+  on(event: string, callback: (data: any) => void): void {
     if (!this.socket) return;
     this.socket.on(event, callback);
   }
